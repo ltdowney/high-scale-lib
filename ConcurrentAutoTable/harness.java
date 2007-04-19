@@ -1,3 +1,8 @@
+/*
+ * Written by Cliff Click and released to the public domain, as explained at
+ * http://creativecommons.org/licenses/publicdomain
+ */
+
 
 import java.util.*;
 
