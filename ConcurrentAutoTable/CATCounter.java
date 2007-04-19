@@ -1,0 +1,10 @@
+
+import java.util.*;
+public final class CATCounter extends Counter {
+  public String name() { return "CAT"; }
+  private final ConcurrentAutoTable _tab = new ConcurrentAutoTable();
+  public long get(){ return _tab.sum(); }
+  public void add( long x ) {  _tab.add(x); }
+  public int internal_size() { return _tab.internal_size(); }
+  public void print() { _tab.print(); }
+}
