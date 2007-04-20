@@ -1,4 +1,4 @@
-import java.util.*;
+import org.cliffc.high_scale_lib.*;
 public final class SyncCounter extends Counter {
   public String name() { return "Synchronized"; }
   private long _cnt;

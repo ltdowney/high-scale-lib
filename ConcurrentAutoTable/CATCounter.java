@@ -1,5 +1,5 @@
 
-import java.util.*;
+import org.cliffc.high_scale_lib.*;
 public final class CATCounter extends Counter {
   public String name() { return "CAT"; }
   private final ConcurrentAutoTable _tab = new ConcurrentAutoTable();

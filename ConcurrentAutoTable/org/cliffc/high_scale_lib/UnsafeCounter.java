@@ -1,5 +1,5 @@
 
-package java.util;
+package org.cliffc.high_scale_lib;
 import sun.misc.Unsafe;
 import java.lang.reflect.*;
 

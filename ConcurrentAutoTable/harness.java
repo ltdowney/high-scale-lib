@@ -4,7 +4,7 @@
  */
 
 
-import java.util.*;
+import org.cliffc.high_scale_lib.*;
 
 public class harness extends Thread {
   static int _thread_min, _thread_max, _thread_incr;
@@ -16,7 +16,7 @@ public class harness extends Thread {
     case  2: return new SyncCounter();
     case  3: return new LockCounter();
     case  4: return new AtomicCounter();
-    case  5: return new java.util.UnsafeCounter();
+    case  5: return new org.cliffc.high_scale_lib.UnsafeCounter();
     case  6: return new   StripeLockCounter(  8);
     case  7: return new StripeUnsafeCounter(  8);
     case  8: return new   StripeLockCounter( 64);
