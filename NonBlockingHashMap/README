@@ -1,0 +1,5 @@
+This directory holds the test harness (both performance and
+correctness) for the NonBlockingHashMap.  The actual implementation is
+in org/cliffc/high_scale_lib/NonBlockingHashMap.java
+
+
