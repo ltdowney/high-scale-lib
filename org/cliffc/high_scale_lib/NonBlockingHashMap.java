@@ -212,13 +212,13 @@ public class NonBlockingHashMap<TypeK, TypeV> extends AbstractMap<TypeK,TypeV>
   // --- wrappers ------------------------------------------------------------
   public int size() { return chm(_kvs).size(); }
   public boolean containsKey( Object key )            { return get(key) != null; }
-  public TypeV put          ( TypeK  key, TypeV val ) { return (TypeV)putIfAbsent( key,  val, NO_MATCH_OLD );  }
-  public TypeV putIfAbsent  ( TypeK  key, TypeV val ) { return (TypeV)putIfAbsent( key,  val, null );  }
-  public TypeV remove       ( Object key )            { return (TypeV)putIfAbsent( key, null, NO_MATCH_OLD );  }
-  public boolean remove     ( Object key, Object val ){ return        putIfAbsent( key, null,  val ) == val; }
+  public TypeV put          ( TypeK  key, TypeV val ) { return (TypeV)putIfMatch( key,  val, NO_MATCH_OLD );  }
+  public TypeV putIfAbsent  ( TypeK  key, TypeV val ) { return (TypeV)putIfMatch( key,  val, null );  }
+  public TypeV remove       ( Object key )            { return (TypeV)putIfMatch( key, null, NO_MATCH_OLD );  }
+  public boolean remove     ( Object key, Object val ){ return        putIfMatch( key, null,  val ) == val; }
   public boolean replace    ( TypeK  key, TypeV  oldValue, TypeV newValue) {
     if (oldValue == null || newValue == null)  throw new NullPointerException();
-    return putIfAbsent( key, newValue, oldValue ) == oldValue;
+    return putIfMatch( key, newValue, oldValue ) == oldValue;
   }
   public TypeV replace( TypeK key, TypeV val ) {
     if (val == null)  throw new NullPointerException();
@@ -228,11 +228,11 @@ public class NonBlockingHashMap<TypeK, TypeV> extends AbstractMap<TypeK,TypeV>
   public void clear() {         // Smack a new empty table down
     _kvs = new NonBlockingHashMap(MIN_SIZE,_kvs[1] != null)._kvs;
   }
-  private final Object putIfAbsent( Object key, TypeV val, Object oldVal ) {
+  private final Object putIfMatch( Object key, TypeV val, Object oldVal ) {
     Object newval = val;
     if( newval == null ) newval = TOMBSTONE;
     if( oldVal == null ) oldVal = TOMBSTONE;
-    Object res = putIfAbsent( _kvs, key, newval, oldVal );
+    Object res = putIfMatch( _kvs, key, newval, oldVal );
     assert !(res instanceof Prime);
     return res == TOMBSTONE ? null : res;
   }
@@ -320,15 +320,15 @@ public class NonBlockingHashMap<TypeK, TypeV> extends AbstractMap<TypeK,TypeV>
     return get_recur(newkvs,key); // Retry on the new table
   }
   
-  // --- putIfAbsent ---------------------------------------------------------
+  // --- putIfMatch ---------------------------------------------------------
   // Put, Remove, PutIfAbsent, etc.  Return the old value.  If the old value
   // is equal to oldVal (or oldVal is NO_MATCH_OLD) then the put can be
   // assumed to work (although might have been immediately overwritten).
-  private final Object putIfAbsent( Object[] kvs, Object key, Object putval, Object oldVal ) {
+  private final Object putIfMatch( Object[] kvs, Object key, Object putval, Object expVal ) {
     assert !(putval instanceof Prime);
-    assert !(oldVal instanceof Prime);
+    assert !(expVal instanceof Prime);
     assert putval != null;
-    assert oldVal != null;
+    assert expVal != null;
     CHM chm = chm(kvs);
     final int   len    = len   (kvs); // Count of key/value pairs
     final int[] hashes = hashes(kvs);
@@ -375,7 +375,7 @@ public class NonBlockingHashMap<TypeK, TypeV> extends AbstractMap<TypeK,TypeV>
         // 'get' will also go to the new table (if any).  We do not need
         // to claim a key slot (indeed, we cannot find a free one to claim!).
         help_copy();
-        return putIfAbsent(chm.resize(kvs,this),key,putval,oldVal);
+        return putIfMatch(chm.resize(kvs,this),key,putval,expVal);
       }      
       hash = (hash+1)&(len-1); // Reprobe!
     }
@@ -402,7 +402,7 @@ public class NonBlockingHashMap<TypeK, TypeV> extends AbstractMap<TypeK,TypeV>
       chm.copy_one_done(hash,kvs,newkvs,this);
       help_copy();
       // Now put into the new table
-      return putIfAbsent(newkvs,key,putval,oldVal);
+      return putIfMatch(newkvs,key,putval,expVal);
     }
     assert !assert_goto_new_table; // tableFull should still be true, so we should not get here!
 
@@ -411,10 +411,10 @@ public class NonBlockingHashMap<TypeK, TypeV> extends AbstractMap<TypeK,TypeV>
     if( V instanceof Prime ) V = ((Prime)V)._V; // Unbox
 
     // Must match old, and we do not?  Then bail out now.
-    if( oldVal != NO_MATCH_OLD && // Do we care about oldVal at all?
-        V != oldVal &&          // No instant match already?
-        !(V==null && oldVal == TOMBSTONE) &&  // Match on null/TOMBSTONE combo
-        !oldVal.equals(V) )     // Expensive equals check
+    if( expVal != NO_MATCH_OLD && // Do we care about expected-Value at all?
+        V != expVal &&          // No instant match already?
+        !(V==null && expVal == TOMBSTONE) &&  // Match on null/TOMBSTONE combo
+        !expVal.equals(V) )     // Expensive equals check
       return V;
 
     // Actually change the Value in the Key,Value pair
