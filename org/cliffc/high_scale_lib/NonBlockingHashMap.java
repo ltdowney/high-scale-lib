@@ -411,7 +411,10 @@ public class NonBlockingHashMap<TypeK, TypeV> extends AbstractMap<TypeK,TypeV>
     if( V instanceof Prime ) V = ((Prime)V)._V; // Unbox
 
     // Must match old, and we do not?  Then bail out now.
-    if( oldVal != NO_MATCH_OLD && V != oldVal && oldVal != null && !oldVal.equals(V) )
+    if( oldVal != NO_MATCH_OLD && // Do we care about oldVal at all?
+        V != oldVal &&          // No instant match already?
+        !(V==null && oldVal == TOMBSTONE) &&  // Match on null/TOMBSTONE combo
+        !oldVal.equals(V) )     // Expensive equals check
       return V;
 
     // Actually change the Value in the Key,Value pair
