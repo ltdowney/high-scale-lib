@@ -21,7 +21,7 @@ public class NonBlockingHashMap<TypeK, TypeV> extends AbstractMap<TypeK,TypeV>
   private static final int REPROBE_LIMIT=10; // Too many reprobes then force a table-resize
 
   // --- Bits to allow Unsafe access to arrays
-  private static final Unsafe _unsafe = Unsafe.getUnsafe();
+  private static final Unsafe _unsafe = UtilUnsafe.getUnsafe();
   private static final int _Obase  = _unsafe.arrayBaseOffset(Object[].class);
   private static final int _Oscale = _unsafe.arrayIndexScale(Object[].class);
   private static long rawIndex(Object[] ary, int i) {

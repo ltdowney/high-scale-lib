@@ -10,10 +10,9 @@ import org.cliffc.high_scale_lib.*;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
-import sun.misc.Unsafe;
 import java.lang.reflect.*;
 
-public class hash_test extends Thread {
+public class perf_hash_test extends Thread {
   static int _read_ratio, _gr, _pr;
   static int _thread_min, _thread_max, _thread_incr;
   static int _table_size;
@@ -72,7 +71,7 @@ public class hash_test extends Thread {
       _thread_max = trips*_thread_incr + _thread_min;
 
     } catch( Exception e ) {
-      System.out.println("Usage: hash_test read%[0=churn test] thread-min thread-max thread-increment hash_table_size impl[All=0,Hashtable=1,HerlihyHashSet=2,CHM_16=3,CHM_256=4,CHM_4096=5,NonBlockingHashMap=6]");
+      System.out.println("Usage: perf_hash_test read%[0=churn test] thread-min thread-max thread-increment hash_table_size impl[All=0,Hashtable=1,HerlihyHashSet=2,CHM_16=3,CHM_256=4,CHM_4096=5,NonBlockingHashMap=6]");
       throw e;
     }
     
@@ -222,7 +221,7 @@ public class hash_test extends Thread {
   final ConcurrentMap<String,String> _hash; // Shared hashtable
   final long[] _ops;
   final long[] _nanos;
-  hash_test( int tnum, ConcurrentMap<String,String> HM, long[] ops, long [] nanos ) { _tnum = tnum; _hash = HM; _ops = ops; _nanos = nanos; }
+  perf_hash_test( int tnum, ConcurrentMap<String,String> HM, long[] ops, long [] nanos ) { _tnum = tnum; _hash = HM; _ops = ops; _nanos = nanos; }
 
   static long run_once( int num_threads, ConcurrentMap<String,String> HM, long[] ops, long [] nanos ) throws Exception {
     Random R = new Random();
@@ -271,9 +270,9 @@ public class hash_test extends Thread {
     // Launch threads
     //long nanoz = System.nanoTime();
     //System.out.println(" "+nanoz+" Create-Threads");
-    hash_test thrs[] = new hash_test[num_threads];
+    perf_hash_test thrs[] = new perf_hash_test[num_threads];
     for( int i=0; i<num_threads; i++ )
-      thrs[i] = new hash_test(i, HM, ops, nanos);
+      thrs[i] = new perf_hash_test(i, HM, ops, nanos);
     for( int i=0; i<num_threads; i++ )
       thrs[i].start();
     // Run threads
@@ -281,7 +280,7 @@ public class hash_test extends Thread {
     //System.out.println(" "+nano+" Start");
     long start = System.currentTimeMillis();
     _start = true;
-    try { Thread.sleep(2000); } catch( Exception e ){}
+    try { Thread.sleep(2000); } catch( InterruptedException e ){}
     _stop = true;
     long stop = System.currentTimeMillis();
     //long nanox = System.nanoTime();

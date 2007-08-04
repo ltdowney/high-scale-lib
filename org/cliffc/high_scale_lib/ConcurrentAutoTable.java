@@ -72,7 +72,7 @@ public class ConcurrentAutoTable {
   private static class CAT {
     
     // Unsafe crud: get a function which will CAS arrays
-    private static final Unsafe _unsafe = Unsafe.getUnsafe();
+    private static final Unsafe _unsafe = UtilUnsafe.getUnsafe();
     private static final int _Lbase  = _unsafe.arrayBaseOffset(long[].class);
     private static final int _Lscale = _unsafe.arrayIndexScale(long[].class);
     private static long rawIndex(long[] ary, int i) {
