@@ -91,7 +91,6 @@ public class ConcurrentAutoTable {
     private volatile long _sum_cache;
     private volatile long _fuzzy_sum_cache;
     private volatile long _fuzzy_time;
-    //private volatile int _max_spin=3;
     private static final int _max_spin=4;
     private long[] _t;            // Power-of-2 array of longs
     private int internal_size() { return _t.length; }
@@ -135,16 +134,19 @@ public class ConcurrentAutoTable {
       r += newbytes;
       if( master._cat != this ) return old; // Already doubled, don't bother
       if( (r>>17) != 0 ) {      // Already too much allocation attempts?
-        // TODO - use a wait with timeout, so we'll wakeup as soon as the new table
-        // is ready, or after the timeout in any case.
+        // TODO - use a wait with timeout, so we'll wakeup as soon as the new
+        // table is ready, or after the timeout in any case.  Annoyingly, this
+        // breaks the non-blocking property - so for now we just briefly sleep.
         //synchronized( this ) { wait(8*megs); }         // Timeout - we always wakeup
-        try { Thread.sleep(r>>17); } catch( Exception e ) { }
+        try { Thread.sleep(r>>17); } catch( InterruptedException e ) { }
         if( master._cat != this ) return old;
       }
 
       CAT newcat = new CAT(this,t.length*2);
-      if( master.CAS_cat(this,newcat) )
-        ;//_max_spin <<= 1;
+      // Take 1 stab at updating the CAT with the new larger size.  If this
+      // fails, we assume some other thread already expanded the CAT - so we
+      // do not need to retry until it succeeds.
+      master.CAS_cat(this,newcat);
       return old;
     }
     

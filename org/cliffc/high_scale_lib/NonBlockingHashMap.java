@@ -16,6 +16,8 @@ import java.lang.reflect.*;
 public class NonBlockingHashMap<TypeK, TypeV> extends AbstractMap<TypeK,TypeV> 
         implements ConcurrentMap<TypeK, TypeV>, Serializable {
 
+  private static final long serialVersionUID = 1234123412341234123L;
+
   private static final int REPROBE_LIMIT=10; // Too many reprobes then force a table-resize
 
   // --- Bits to allow Unsafe access to arrays
@@ -226,7 +228,10 @@ public class NonBlockingHashMap<TypeK, TypeV> extends AbstractMap<TypeK,TypeV>
   }
   public boolean contains( Object val ) { return contains(_kvs,val); }
   public void clear() {         // Smack a new empty table down
-    _kvs = new NonBlockingHashMap(MIN_SIZE,_kvs[1] != null)._kvs;
+    Object[] newkvs = new NonBlockingHashMap(MIN_SIZE,_kvs[1] != null)._kvs;
+    while( !CAS_kvs(_kvs,newkvs) ) // Spin until the clear works
+      ;
+
   }
   private final Object putIfMatch( Object key, TypeV val, Object oldVal ) {
     Object newval = val;
@@ -471,7 +476,7 @@ public class NonBlockingHashMap<TypeK, TypeV> extends AbstractMap<TypeK,TypeV>
     // Set the _next field if we can.
     boolean CAS_newkvs( Object[] newkvs ) { 
       while( _newkvs == null ) 
-        if( _newkvsUpdater.compareAndSet(this,null,newkvs) ) 
+        if( _newkvsUpdater.compareAndSet(this,null,newkvs) )
           return true;
       return false;
     }
