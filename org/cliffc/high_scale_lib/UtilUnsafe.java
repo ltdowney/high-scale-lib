@@ -1,7 +1,5 @@
 package org.cliffc.high_scale_lib;
-
 import java.lang.reflect.Field;
-
 import sun.misc.Unsafe;
 
 class UtilUnsafe {

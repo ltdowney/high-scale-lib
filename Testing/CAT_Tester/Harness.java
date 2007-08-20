@@ -10,7 +10,7 @@ public class Harness extends Thread {
   static int _thread_min, _thread_max, _thread_incr;
   static int _ctr_impl;
 
-  static Counter make_ctr( int impl ) {
+  static Counter make_ctr( final int impl ) {
     switch( impl ) {
     case  1: return new RaceyCounter();
     case  2: return new SyncCounter();
@@ -33,16 +33,16 @@ public class Harness extends Thread {
   static volatile boolean _stop;
   static final int NUM_CPUS = Runtime.getRuntime().availableProcessors();
 
-  static int check( String arg, String msg, int lower, int upper ) throws Exception {
+  static int check( String arg, String msg, int lower, int upper ) {
     return check( Integer.parseInt(arg), msg, lower, upper );
   }
-  static int check( int x, String msg, int lower, int upper ) throws Exception {
+  static int check( int x, String msg, int lower, int upper ) {
     if( x < lower || x > upper )
       throw new Error(msg+" must be from "+lower+" to "+upper);
     return x;
   }
 
-  public static void main( String args[] ) throws Exception {
+  public static void main( String args[] ) {
     // Parse args
     try { 
       _thread_min   = check( args[0], "thread_min", 1, 100000 );
@@ -53,7 +53,7 @@ public class Harness extends Thread {
       int trips = (_thread_max - _thread_min)/_thread_incr;
       _thread_max = trips*_thread_incr + _thread_min;
 
-    } catch( Exception e ) {
+    } catch( Error e ) {
       System.out.println("Usage: harness thread-min thread-max thread-incr impl[All=0]");
       throw e;
     }
@@ -75,7 +75,7 @@ public class Harness extends Thread {
       run_till_stable( i, num_trials );
   }
 
-  static void run_till_stable( int num_threads, int num_trials ) throws Exception {
+  static void run_till_stable( int num_threads, int num_trials ) {
     if( _ctr_impl > 0 ) {
       run_till_stable(num_threads,num_trials,_ctr_impl);
     } else if( _ctr_impl == 0 ) {
@@ -88,12 +88,13 @@ public class Harness extends Thread {
     }
   }
 
-  static void run_till_stable( int num_threads, int num_trials, int impl ) throws Exception {
+  static void run_till_stable( int num_threads, int num_trials, int impl ) {
 
     Counter C = make_ctr(impl);
     System.out.printf("=== %10.10s  %3d  cnts/sec=",C.name(),num_threads);
     long[] trials = new long[num_trials]; // Number of trials
-    long total = 0;
+    long total_ops = 0;                   // Total ops altogether
+    long total_ops_sec = 0;               // Sum of ops/sec for each run
 
     // Run some trials
     for( int j=0; j<trials.length; j++ ) {
@@ -102,9 +103,11 @@ public class Harness extends Thread {
       long sum = 0;
       for( int i=0; i<num_threads; i++ ) 
         sum += ops[i];
+      total_ops += sum;
+      sum = sum*1000L/millis;
       trials[j] = sum;
-      total += sum;
-      System.out.printf(" %10d",((sum*1000L)/millis));
+      total_ops_sec += sum;
+      System.out.printf(" %10d",sum);
     }
 
     // Compute nice trial results
@@ -116,11 +119,10 @@ public class Harness extends Thread {
         if( trials[lo] < trials[j] ) lo=j;
         if( trials[hi] > trials[j] ) hi=j;
       }
-      long total2 = total - (trials[lo]+trials[hi]);
+      long total2 = total_ops_sec - (trials[lo]+trials[hi]);
       trials[lo] = trials[trials.length-1];
       trials[hi] = trials[trials.length-2];
       // Print avg,stddev
-...average score is printing as crap....
       long avg = total2/(trials.length-2);
       long stddev = compute_stddev(trials,trials.length-2);
       long p = stddev*100/avg;  // std-dev as a percent
@@ -129,10 +131,10 @@ public class Harness extends Thread {
       System.out.printf(" (+/-%2d%%)",p);
     }
     
-    long loss = total - C.get();
+    long loss = total_ops - C.get();
     if( loss != 0 ) {
       System.out.print("  Lossage=");
-      int loss_per = (int)(loss*100/total);
+      int loss_per = (int)(loss*100/total_ops);
       System.out.print(loss_per == 0 ? (""+loss) : (""+loss_per+"%"));
     }
 
@@ -163,7 +165,7 @@ public class Harness extends Thread {
   final long[] _ops;
   Harness( int tnum, Counter C, long[] ops ) { _tnum = tnum; _C = C; _ops = ops; }
 
-  static long run_once( int num_threads, Counter C, long[] ops ) throws Exception {
+  static long run_once( int num_threads, Counter C, long[] ops ) {
     _start = false;
     _stop = false;
 
@@ -188,8 +190,11 @@ public class Harness extends Thread {
     long stop = System.currentTimeMillis();
     long millis = stop-start;
 
-    for( int i=0; i<num_threads; i++ )
-      thrs[i].join();
+    for( int i=0; i<num_threads; i++ ) {
+      try {
+        thrs[i].join();
+      } catch( InterruptedException e ) { }
+    }
     return millis;
   }
 

@@ -636,7 +636,7 @@ public class NonBlockingHashMap<TypeK, TypeV> extends AbstractMap<TypeK,TypeV>
       int panicidx = -1;
       while( _copyDone < oldlen ) { // Still needing to copy?
         // Carve out a chunk of work.  The counter wraps around so every
-        // eventually tries to copy every slot.
+        // thread eventually tries to copy every slot.
         while( true ) {
           int ci = (int)_copyIdx; // Read start of next unclaimed work chunk
           if( ci >= (oldlen<<1) ) { // Panic?
@@ -704,15 +704,15 @@ public class NonBlockingHashMap<TypeK, TypeV> extends AbstractMap<TypeK,TypeV>
     // instead of giving up on conflict.  This means that a poor helper thread
     // might be stuck spinning until obstructing threads finish doing updates
     // but those are limited to 1 late-arriving update per thread.
-    private final boolean copy_one( int i, Object[] oldkvs, Object[] newkvs, NonBlockingHashMap topmap ) {
-      Object key = key(oldkvs,i);
+    private final boolean copy_one( int idx, Object[] oldkvs, Object[] newkvs, NonBlockingHashMap topmap ) {
+      Object key = key(oldkvs,idx);
       if( key == CHECK_NEW_TABLE_SENTINEL ) // slot already dead?
         return false;           // Slot dead but we did not do it
       if( key == null ) {         // Try to kill a dead slot
-        if( CAS_key(oldkvs,i, null, CHECK_NEW_TABLE_SENTINEL ) )
+        if( CAS_key(oldkvs,idx, null, CHECK_NEW_TABLE_SENTINEL ) )
           return true;          // We made slot go dead
         // CAS from null-2-CHECK_NEW failed.  Check for slot already dead
-        key = key(oldkvs,i);      // Reload after failed CAS
+        key = key(oldkvs,idx);      // Reload after failed CAS
         assert key != null;
         if( key == CHECK_NEW_TABLE_SENTINEL ) // slot already dead?
           return false;         // Slot dead but we did not do it
@@ -720,7 +720,7 @@ public class NonBlockingHashMap<TypeK, TypeV> extends AbstractMap<TypeK,TypeV>
       final int   len    = len   (newkvs); // Count of key/value pairs
       // ought to copy hash here, no call hash() again
       final int[] hashes = hashes(newkvs);
-      final int fullhash = (hashes != null) ? hashes(oldkvs)[i] : hash(key);
+      final int fullhash = (hashes != null) ? hashes(oldkvs)[idx] : hash(key);
       int hash = fullhash & (len-1);
       CHM newchm = chm(newkvs);
 
@@ -730,12 +730,12 @@ public class NonBlockingHashMap<TypeK, TypeV> extends AbstractMap<TypeK,TypeV>
       while( true ) {                // Spin till we get key slot
         Object K = key(newkvs,hash); // Get current key
         if( K == null ) {            // Slot is free?
-          Object V = val(oldkvs,i);  // Read OLD table
+          Object V = val(oldkvs,idx);  // Read OLD table
           assert !(V instanceof Prime);
           if( V == CHECK_NEW_TABLE_SENTINEL ) return false; // Dead in old, not in new, so copy complete
           // Not in old table, not in new table, and no need for it in new table.
           if( V == null || V == TOMBSTONE ) { 
-            if( CAS_val(oldkvs, i, null, CHECK_NEW_TABLE_SENTINEL ) ) // Try to wipe it out now.
+            if( CAS_val(oldkvs, idx, null, CHECK_NEW_TABLE_SENTINEL ) ) // Try to wipe it out now.
               return true;
           }
           // Claim new-table slot for key!
@@ -751,13 +751,13 @@ public class NonBlockingHashMap<TypeK, TypeV> extends AbstractMap<TypeK,TypeV>
           break;                  // Got it!
 
         if( ++cnt >= (REPROBE_LIMIT+(len>>2)) ) {
-          Object V = val(oldkvs,i);  // Read OLD table
+          Object V = val(oldkvs,idx);  // Read OLD table
           if( V == CHECK_NEW_TABLE_SENTINEL ) return false; // Dead in old, not in new, so copy complete
           // Still in old table, but no space in new???
           long nano = System.nanoTime();
           long slots= newchm.slots();
           long size = size();
-          System.out.println(""+nano+" copy oldslot="+i+"/"+len(oldkvs)+" K="+K+" no_slot="+cnt+"/"+len+" slots="+slots+" live="+size+"");
+          System.out.println(""+nano+" copy oldslot="+idx+"/"+len(oldkvs)+" K="+K+" no_slot="+cnt+"/"+len+" slots="+slots+" live="+size+"");
           throw new Error();
         }
         hash = (hash+1)&(len-1); // Reprobe!
@@ -771,7 +771,7 @@ public class NonBlockingHashMap<TypeK, TypeV> extends AbstractMap<TypeK,TypeV>
       while( true ) {
         newV = val(newkvs,hash);
         Object[] dummy = _newkvs; // dummy volatile read
-        oldV = val(oldkvs,i);
+        oldV = val(oldkvs,idx);
         assert !(oldV instanceof Prime);
         assert oldV != null;
 
@@ -790,7 +790,7 @@ public class NonBlockingHashMap<TypeK, TypeV> extends AbstractMap<TypeK,TypeV>
         // newV is now a prime version of oldV, or perhaps newV is not prime at all
         assert( !(newV instanceof Prime) || ((Prime)newV)._V == oldV );
         // Complete copy by killing old slot with a CHECK_NEW
-        if( CAS_val(oldkvs, i, oldV, CHECK_NEW_TABLE_SENTINEL ) ) {
+        if( CAS_val(oldkvs, idx, oldV, CHECK_NEW_TABLE_SENTINEL ) ) {
           did_work = true;
           break;
         }
@@ -1042,16 +1042,20 @@ public class NonBlockingHashMap<TypeK, TypeV> extends AbstractMap<TypeK,TypeV>
   // Write a NonBlockingHashMap to a stream
   private void writeObject(java.io.ObjectOutputStream s) throws IOException  {
     s.defaultWriteObject();
-    Object[] kvs = _kvs;
+    // Load once the Hashtable being serialized.  During a race with resizing
+    // this can change.  Basically, we snapshot the current table.
+    Object[] kvs = _kvs;        // The hashtable being serialized. 
     for( int i=0; i<len(kvs); i++ ) {
       Object K = key(kvs,i);
-      Object V = Prime.unbox(val(kvs,i));
-      if( K != null && V != null && V != CHECK_NEW_TABLE_SENTINEL ) {
-        s.writeObject(K);
-        s.writeObject(V);
+      if( K != null && K != CHECK_NEW_TABLE_SENTINEL ) { // Only serialize keys in this table
+        Object V = get(K);      // But do an official 'get' in case key is being copied
+        if( V != null ) {       // Key might have been deleted
+          s.writeObject(K);
+          s.writeObject(V);
+        }
       }
     }
-    s.writeObject(null);
+    s.writeObject(null);        // Write 'null key' sentinel to signal end
     s.writeObject(null);
   }
     
