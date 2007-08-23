@@ -6,6 +6,7 @@
 package org.cliffc.high_scale_lib;
 import sun.misc.Unsafe;
 import java.util.concurrent.atomic.*;
+import java.io.Serializable;
 
 // An auto-resizing table of values.  Updates are done with CAS's to no
 // particular table element.  The intent is to support highly scalable
@@ -17,10 +18,10 @@ import java.util.concurrent.atomic.*;
 // untested as an API for making a scalable r/w lock and so is likely to
 // change!
 
-public class ConcurrentAutoTable {
+public class ConcurrentAutoTable implements Serializable {
 
   private volatile CAT _cat = new CAT(null,4/*Start Small, Think Big!*/);
-  private final AtomicReferenceFieldUpdater<ConcurrentAutoTable,CAT> _catUpdater =
+  private static final AtomicReferenceFieldUpdater<ConcurrentAutoTable,CAT> _catUpdater =
     AtomicReferenceFieldUpdater.newUpdater(ConcurrentAutoTable.class,CAT.class, "_cat");
   boolean CAS_cat( CAT oldcat, CAT newcat ) { return _catUpdater.compareAndSet(this,oldcat,newcat); }
 
@@ -69,7 +70,7 @@ public class ConcurrentAutoTable {
   }
 
 
-  private static class CAT {
+  private static class CAT implements Serializable {
     
     // Unsafe crud: get a function which will CAS arrays
     private static final Unsafe _unsafe = UtilUnsafe.getUnsafe();

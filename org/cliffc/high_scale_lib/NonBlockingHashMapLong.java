@@ -44,11 +44,11 @@ public class NonBlockingHashMapLong<TypeV> implements Serializable {
     catch( java.lang.NoSuchFieldException e ) { throw new Error(e); } 
     _chm_offset = _unsafe.objectFieldOffset(f);
 
-    try { f = NonBlockingHashMapLong.class.getDeclaredField("_val_1_offset"); } 
+    try { f = NonBlockingHashMapLong.class.getDeclaredField("_val_1"); } 
     catch( java.lang.NoSuchFieldException e ) { throw new Error(e); } 
     _val_1_offset = _unsafe.objectFieldOffset(f);
 
-    try { f = NonBlockingHashMapLong.class.getDeclaredField("_val_2_offset"); } 
+    try { f = NonBlockingHashMapLong.class.getDeclaredField("_val_2"); } 
     catch( java.lang.NoSuchFieldException e ) { throw new Error(e); } 
     _val_2_offset = _unsafe.objectFieldOffset(f);
   }
@@ -134,7 +134,7 @@ public class NonBlockingHashMapLong<TypeV> implements Serializable {
     if( initial_sz < 0 ) throw new IllegalArgumentException();
     int i;                      // Convert to next largest power-of-2
     for( i=MIN_SIZE_LOG; (1<<i) < initial_sz; i++ ) ;
-    _chm = new CHM(i);
+    _chm = new CHM(this,i);
     _size = new ConcurrentAutoTable();
   }
 
@@ -160,18 +160,18 @@ public class NonBlockingHashMapLong<TypeV> implements Serializable {
     return _chm.contains(val); 
   }
   public void clear() {         // Smack a new empty table down
-    CHM newchm = new CHM(MIN_SIZE_LOG);
+    CHM newchm = new CHM(this,MIN_SIZE_LOG);
     while( !CAS(_chm_offset,_chm,newchm) ) // Spin until the clear works
       ;
   }
 
 
-  private final Object putIfMatch( Object V, TypeV val, Object oldVal, long off ) {
-    if( oldVal == NO_MATCH_OLD || // Do we care about expected-Value at all?
-        V == oldVal ||            // No instant match already?
-        oldVal.equals(V) )        // Expensive equals check
-      CAS(off,V,val);             // One shot CAS update attempt
-    return V;
+  private final Object putIfMatch( Object curVal, TypeV val, Object expVal, long off ) {
+    if( expVal == NO_MATCH_OLD || // Do we care about expected-Value at all?
+        curVal == expVal ||       // No instant match already?
+        (expVal != null && expVal.equals(curVal)) ) // Expensive equals check
+      CAS(off,curVal,val);        // One shot CAS update attempt
+    return curVal;                // Return the last value present
   }
 
   private final Object putIfMatch( long key, TypeV val, Object oldVal ) {
@@ -205,7 +205,9 @@ public class NonBlockingHashMapLong<TypeV> implements Serializable {
  
 
   // --- CHM -----------------------------------------------------------------
-  private final class CHM<TypeV> {
+  private static final class CHM<TypeV> implements Serializable {
+    final NonBlockingHashMapLong _nbhm;
+
     // These next 2 fields are used in the resizing heuristics, to judge when
     // it is time to resize or copy the table.  Slots is a count of used-up
     // key slots, and when it nears a large fraction of the table we probably
@@ -225,7 +227,7 @@ public class NonBlockingHashMapLong<TypeV> implements Serializable {
     // the new table being copied from the old one.  It monotonically transits
     // from null to set (once).
     volatile CHM _newchm;
-    private final AtomicReferenceFieldUpdater<CHM,CHM> _newchmUpdater =
+    private static final AtomicReferenceFieldUpdater<CHM,CHM> _newchmUpdater =
       AtomicReferenceFieldUpdater.newUpdater(CHM.class,CHM.class, "_newchm");
     // Set the _newchm field if we can.
     boolean CAS_newchm( CHM newchm ) { 
@@ -247,7 +249,7 @@ public class NonBlockingHashMapLong<TypeV> implements Serializable {
     // could in parallel initialize the array.  Java does not allow
     // un-initialized array creation (especially of ref arrays!).
     volatile long _resizers;    // count of threads attempting an initial resize
-    private final AtomicLongFieldUpdater<CHM> _resizerUpdater =
+    private static final AtomicLongFieldUpdater<CHM> _resizerUpdater =
       AtomicLongFieldUpdater.newUpdater(CHM.class, "_resizers");
 
     // --- key,val -------------------------------------------------------------
@@ -263,7 +265,8 @@ public class NonBlockingHashMapLong<TypeV> implements Serializable {
     Object [] _vals;
    
     // Simple constructor
-    CHM( int logsize ) {
+    CHM( NonBlockingHashMapLong nbhm, int logsize ) {
+      _nbhm = nbhm;
       _slots= new ConcurrentAutoTable();
       _last_resize_milli = System.currentTimeMillis();
       _keys = new long  [1<<logsize];
@@ -348,7 +351,7 @@ public class NonBlockingHashMapLong<TypeV> implements Serializable {
       // Found table-copy sentinel; retry the get on the new table then help copy
       CHM chm = _newchm; // New table, if any; this counts as the volatile read needed between tables
       if( chm == null ) return null; // No new table, so a clean miss.
-      help_copy();
+      _nbhm.help_copy();
       return chm.get_recur(key); // Retry on the new table
     }
   
@@ -401,7 +404,7 @@ public class NonBlockingHashMapLong<TypeV> implements Serializable {
           // We simply must have a new table to do a 'put'.  At this point a
           // 'get' will also go to the new table (if any).  We do not need
           // to claim a key slot (indeed, we cannot find a free one to claim!).
-          help_copy();
+          _nbhm.help_copy();
           return resize().putIfMatch(key,putval,expVal);
         }      
         hash = (hash+1)&(len-1); // Reprobe!
@@ -425,7 +428,7 @@ public class NonBlockingHashMapLong<TypeV> implements Serializable {
         // table copy is in progress (i.e., limited by thread count).
         copy_one_done(hash);
         // Help any top-level copy along
-        help_copy();
+        _nbhm.help_copy();
         // Now put into the new table
         return newchm.putIfMatch(key,putval,expVal);
       }
@@ -446,8 +449,8 @@ public class NonBlockingHashMapLong<TypeV> implements Serializable {
       if( CAS_val(hash, V, putval ) ) { // Note: no looping on this CAS failing
         // CAS succeeded - we did the update!
         // Adjust sizes - a striped counter
-        if(  (V == null || V == TOMBSTONE) && putval != TOMBSTONE ) _size.add( 1);
-        if( !(V == null || V == TOMBSTONE) && putval == TOMBSTONE ) _size.add(-1);
+        if(  (V == null || V == TOMBSTONE) && putval != TOMBSTONE ) _nbhm._size.add( 1);
+        if( !(V == null || V == TOMBSTONE) && putval == TOMBSTONE ) _nbhm._size.add(-1);
       }
       // Win or lose the CAS, we are done.  If we won then we know the update
       // happened as expected.  If we lost, it means "we won but another thread
@@ -483,14 +486,14 @@ public class NonBlockingHashMapLong<TypeV> implements Serializable {
         if( newchm != null )    // See if resize is already in progress
           return newchm;        // Use the new table already
         // If we are a nested table, force the top-level table to finish resizing
-        CHM topchm = _chm;
+        CHM topchm = _nbhm._chm;
         if( topchm == this ) break;  // We ARE the top-level table
         topchm.help_copy_impl(true); // Force the top-level table resize to finish
       }
       
       int oldlen = _keys.length; // Old count of K,V pairs allowed
       assert slots() >= REPROBE_LIMIT+(oldlen>>2); // No change in size needed?
-      int sz = size();          // Get current table count of active K,V pairs
+      int sz = _nbhm.size(); // Get current table count of active K,V pairs
       int newsz = sz;           // First size estimate
 
       // Heuristic to determine new size.  We expect plenty of dead-slots-with-keys 
@@ -535,7 +538,7 @@ public class NonBlockingHashMapLong<TypeV> implements Serializable {
         return newchm;          // Use the new table already
 
       // Double size for K,V pairs
-      newchm = new CHM(log2);
+      newchm = new CHM(_nbhm,log2);
       // Another check after the slow allocation
       if( _newchm != null )     // See if resize is already in progress
         return _newchm;         // Use the new table already
@@ -559,14 +562,14 @@ public class NonBlockingHashMapLong<TypeV> implements Serializable {
     // the counter simply wraps and work is copied duplicately until somebody
     // somewhere completes the count.
     volatile long _copyIdx = 0;
-    private final AtomicLongFieldUpdater<CHM> _copyIdxUpdater =
+    private static final AtomicLongFieldUpdater<CHM> _copyIdxUpdater =
       AtomicLongFieldUpdater.newUpdater(CHM.class, "_copyIdx");
 
     // Work-done reporting.  Used to efficiently signal when we can move to
     // the new table.  From 0 to len(oldkvs) refers to copying from the old
     // table to the new.
     volatile long _copyDone= 0;
-    private final AtomicLongFieldUpdater<CHM> _copyDoneUpdater =
+    private static final AtomicLongFieldUpdater<CHM> _copyDoneUpdater =
       AtomicLongFieldUpdater.newUpdater(CHM.class, "_copyDone");
 
     // --- help_copy_impl ----------------------------------------------------
@@ -637,7 +640,7 @@ public class NonBlockingHashMapLong<TypeV> implements Serializable {
       // Check for copy being ALL done, and promote
       if( copyDone+workdone == _keys.length ) {
         //long nano = System.nanoTime();
-        if( CAS(_chm_offset,this,_newchm) ) { // Promote!
+        if( _nbhm.CAS(_chm_offset,this,_newchm) ) { // Promote!
           //System.out.println(" "+nano+" Promote table to "+len(_newkvs));
         }
       }
@@ -701,7 +704,7 @@ public class NonBlockingHashMapLong<TypeV> implements Serializable {
           // Still in old table, but no space in new???
           long nano = System.nanoTime();
           long slots= newchm.slots();
-          System.out.println(""+nano+" copy oldslot="+idx+"/"+_keys.length+" K="+K+" no_slot="+cnt+"/"+len+" slots="+slots+" live="+size()+"");
+          System.out.println(""+nano+" copy oldslot="+idx+"/"+_keys.length+" K="+K+" no_slot="+cnt+"/"+len+" slots="+slots+" live="+_nbhm.size()+"");
           throw new Error();
         }
         hash = (hash+1)&(len-1); // Reprobe!
@@ -757,7 +760,7 @@ public class NonBlockingHashMapLong<TypeV> implements Serializable {
       for( int i=0; i<_keys.length; i++ ) {
         long K = _keys[i];
         if( K != NO_KEY && K != CHECK_NEW_TABLE_LONG ) { // Only serialize keys in this table
-          Object V = get(K);    // But do an official 'get' in case key is being copied
+          Object V = _nbhm.get(K);    // But do an official 'get' in case key is being copied
           if( V != null ) {     // Key might have been deleted
             s.writeLong  (K);
             s.writeObject(V);
