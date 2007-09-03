@@ -805,6 +805,16 @@ public class NonBlockingHashMap<TypeK, TypeV> extends AbstractMap<TypeK,TypeV>
     } // end copy_one
   }
 
+  // --- Snapshot ------------------------------------------------------------
+  public Snapshot snapshot() { return new Snapshot<TypeK,TypeV>(_kvs); }
+
+  static class Snapshot<TypeK,TypeV> {
+    final Object[] _kvs;
+    public Snapshot(Object[] kvs) { _kvs = kvs; }
+    int length() { return len(_kvs); }
+    Object key(int idx) { return NonBlockingHashMap.key(_kvs,idx); }
+  }
+
   //
   // Starting from here to the end, this code was shamelessly copied from 
   // Doug Lea's ConcurrentHashMap.

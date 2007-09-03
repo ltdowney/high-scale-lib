@@ -14,18 +14,60 @@ public class NonBlockingHashSet<E> implements Set<E> {
 
   public NonBlockingHashSet() { _map = new NonBlockingHashMap<E,E>(); }
 
-  public boolean add        ( E          o ) { return _map.putIfAbsent(o,o) != o; }
-  public boolean contains   ( Object     o ) { return _map.containsKey(o); }
-  public boolean isEmpty    (              ) { return _map.size() == 0; }
-  public boolean remove     ( Object     o ) { return _map.remove(o) == o; }
-  public int     size       (              ) { return _map.size(); }
-  public void    clear      (              ) { _map.clear(); }
-  
-  public <T> T[] toArray    ( T[]        a ) { throw new RuntimeException("not implemented"); }
-  public Iterator<E>iterator(              ) { throw new RuntimeException("not implemented"); }
-  public Object[]toArray    (              ) { throw new RuntimeException("not implemented"); }
-  public boolean addAll     ( Collection<? extends E> c ) { throw new RuntimeException("not implemented"); }
-  public boolean containsAll( Collection c ) { throw new RuntimeException("not implemented"); }
-  public boolean removeAll  ( Collection c ) { throw new RuntimeException("not implemented"); }
-  public boolean retainAll  ( Collection c ) { throw new RuntimeException("not implemented"); }
+  public boolean add        ( final E          o ) { return _map.putIfAbsent(o,o) != o; }
+  public boolean contains   ( final Object     o ) { return _map.containsKey(o); }
+  public boolean isEmpty    (                    ) { return _map.size() == 0; }
+  public boolean remove     ( final Object     o ) { return _map.remove(o) == o; }
+  public int     size       (                    ) { return _map.size(); }
+  public void    clear      (                    ) { _map.clear(); }
+
+  public Iterator<E>iterator(              ) { return new SetIterator<E>(); }
+
+  public <T> T[] toArray    ( final T[]        a ) { throw new RuntimeException("not implemented"); }
+  public Object[]toArray    (                    ) { throw new RuntimeException("not implemented"); }
+  public boolean addAll     ( final Collection<? extends E> c ) { throw new RuntimeException("not implemented"); }
+  public boolean containsAll( final Collection c ) { throw new RuntimeException("not implemented"); }
+  public boolean removeAll  ( final Collection c ) { throw new RuntimeException("not implemented"); }
+  public boolean retainAll  ( final Collection c ) { throw new RuntimeException("not implemented"); }
+
+  // ---
+  // This iterator is NOT multi-threaded safe per-se.  Multiple callers of the
+  // same iterator will confuse the underlying variables and can crash the
+  // Iterator.  
+
+  // The Iterator only guarantees to visit those elements that exist over the
+  // entire lifetime of iteration.  Even if this iterator is always called
+  // single-threaded, the underlying Set can be concurrently modified.
+  // Elements inserted or removed during iteration (by this or another thread)
+  // may or may not be visited.  However, if no other thread is modifying the
+  // set and this thread is not adding members and only deleting members found
+  // with next() (or by calling remove()), then the iterator is guaranteed to
+  // visit all members.  i.e., the Set can be used as a worklist.
+  final private class SetIterator<E> implements Iterator<E> {
+    private final NonBlockingHashMap.Snapshot<E,E> _ss;
+    private int _idx;                   // Index
+    private Object _next;               // Next found element
+    private Object _toberemoved;
+    SetIterator() {
+      _ss = _map.snapshot();    // Get a snapshot
+      next();                   // Setup for 'next' call
+    }
+    public boolean hasNext() { return _next != null; }
+    public void remove() { 
+      if( _toberemoved == null ) throw new IllegalStateException(); 
+      _map.remove(_toberemoved);  
+      _toberemoved = null;
+    }
+    public E next() { 
+      final Object nn = _next;  // The definite 'next' value to be returned
+      _next = null;             // But now find the next 'next'
+      while( _idx<_ss.length() ) { // Scan array
+        _next = _ss.key(_idx++);  // Get a key that definitely is in the set (for the moment!)
+        if( _next != null  )    // Found something?
+          break;
+      }                         // Else keep scanning
+      _toberemoved = nn;
+      return (E)nn;             // Return 'next' value
+    }
+  }
 }
