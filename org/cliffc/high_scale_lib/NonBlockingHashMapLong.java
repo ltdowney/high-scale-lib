@@ -13,7 +13,7 @@ import sun.misc.Unsafe;
 import java.lang.reflect.*;
 //import com.azulsystems.util.Prefetch;
 
-public class NonBlockingHashMapLong<TypeV> implements Serializable {
+public class NonBlockingHashMapLong<TypeV> implements Map<Long,TypeV>, Serializable {
 
   private static final long serialVersionUID = 1234123412341234124L;
 
@@ -128,7 +128,13 @@ public class NonBlockingHashMapLong<TypeV> implements Serializable {
     }
   }
 
+  // --- check ---------------------------------------------------------------
+  // Internal consistency check
+  public final void check() {
+  }
+
   // --- NonBlockingHashMap --------------------------------------------------
+  // Constructors
   public NonBlockingHashMapLong( ) { this(MIN_SIZE); }
   public NonBlockingHashMapLong( int initial_sz ) { 
     if( initial_sz < 0 ) throw new IllegalArgumentException();
@@ -140,6 +146,7 @@ public class NonBlockingHashMapLong<TypeV> implements Serializable {
 
   // --- wrappers ------------------------------------------------------------
   public int     size       ( )                     { return (_val_1==null?0:1) + (_val_2==null?0:1) + (int)_size.sum(); }
+  public boolean isEmpty    ( )                     { return size()==0; }
   public boolean containsKey( long key )            { return get(key) != null; }
   public TypeV   put        ( long key, TypeV val ) { return (TypeV)putIfMatch( key,  val, NO_MATCH_OLD );  }
   public TypeV   putIfAbsent( long key, TypeV val ) { return (TypeV)putIfMatch( key,  val, null );  }
@@ -153,18 +160,18 @@ public class NonBlockingHashMapLong<TypeV> implements Serializable {
     if (val == null)  throw new NullPointerException();
     return putIfAbsent( key, val );
   }
-  public boolean contains( Object val ) { 
+  public boolean containsValue( Object val ) { 
     if( val == null ) throw new NullPointerException();
     if( _val_1 == val ) return true; // Key -1
     if( _val_2 == val ) return true; // Key -2
     return _chm.contains(val); 
   }
+  public boolean contains( Object val ) { return containsValue(val); }
   public void clear() {         // Smack a new empty table down
     CHM newchm = new CHM(this,MIN_SIZE_LOG);
     while( !CAS(_chm_offset,_chm,newchm) ) // Spin until the clear works
       ;
   }
-
 
   private final Object putIfMatch( Object curVal, TypeV val, Object expVal, long off ) {
     if( expVal == NO_MATCH_OLD || // Do we care about expected-Value at all?
@@ -192,6 +199,16 @@ public class NonBlockingHashMapLong<TypeV> implements Serializable {
     Object V = _chm.get_impl(key);
     assert !(V instanceof Prime); // No prime in main oldest table
     return V == TOMBSTONE ? null : (TypeV)V;
+  }
+
+  public TypeV get   ( Object key ) { return (key instanceof Long) ? get   (((Long)key).longValue()) : null;  }
+  public TypeV remove( Object key ) { return (key instanceof Long) ? remove(((Long)key).longValue()) : null;  }
+  public boolean remove( Object key, Object Val ) { return (key instanceof Long) ? remove(((Long)key).longValue(), Val) : false;  }
+  public boolean containsKey( Object key ) { return (key instanceof Long) ? containsKey(((Long)key).longValue()) : false; }
+  public TypeV put( Long key, TypeV val ) { return put(key.longValue(),val); }
+
+  public void putAll(Map<? extends Long,? extends TypeV> t) {
+    throw new Error("Unimplemented");
   }
 
   // --- help_copy ---------------------------------------------------------
@@ -261,8 +278,8 @@ public class NonBlockingHashMapLong<TypeV> implements Serializable {
       return _unsafe.compareAndSwapObject( _vals, rawIndex(_vals, idx), old, val );
     }
 
-    long   [] _keys;
-    Object [] _vals;
+    final long   [] _keys;
+    final Object [] _vals;
    
     // Simple constructor
     CHM( NonBlockingHashMapLong nbhm, int logsize ) {
@@ -751,10 +768,8 @@ public class NonBlockingHashMapLong<TypeV> implements Serializable {
       return did_work;
     } // end copy_one
 
-
-    // ---------------- Serialization Support -------------- 
     // --- writeObject -------------------------------------------------------
-    // Write a NonBlockingHashMap to a stream
+    // Write a CHM to a stream
     private void writeObject(java.io.ObjectOutputStream s) throws IOException  {
       s.defaultWriteObject();
       for( int i=0; i<_keys.length; i++ ) {
@@ -762,7 +777,7 @@ public class NonBlockingHashMapLong<TypeV> implements Serializable {
         if( K != NO_KEY && K != CHECK_NEW_TABLE_LONG ) { // Only serialize keys in this table
           Object V = _nbhm.get(K);    // But do an official 'get' in case key is being copied
           if( V != null ) {     // Key might have been deleted
-            s.writeLong  (K);
+            s.writeLong  (K);   // Write the <long,TypeV> pair
             s.writeObject(V);
           }
         }
@@ -771,6 +786,125 @@ public class NonBlockingHashMapLong<TypeV> implements Serializable {
   
   } // End CHM class
 
+  // --- Snapshot ------------------------------------------------------------
+  class SnapshotV implements Iterator<TypeV> {
+    final CHM _chm;
+    public SnapshotV(CHM chm) { _chm = chm; _idx = -2; next(); }
+    int length() { return _chm._keys.length; }
+    long key(int idx) { return _chm._keys[idx]; }
+    private int _idx;           // -2 for NO_KEY, -1 for CHECK_NEW_TABLE_LONG, 0-keys.length
+    private long  _nextK, _prevK; // Last 2 keys found
+    private TypeV _nextV, _prevV; // Last 2 values found
+    public boolean hasNext() { return _nextV != null; }
+    public TypeV next() {
+      // 'next' actually knows what the next value will be - it had to
+      // figure that out last go 'round lest 'hasNext' report true and
+      // some other thread deleted the last value.  Instead, 'next'
+      // spends all its effort finding the key that comes after the
+      // 'next' key.
+      if( _idx != -2 && _nextV == null ) throw new IllegalStateException();
+      _prevK = _nextK;          // This will become the previous key
+      _prevV = _nextV;          // This will become the previous value
+      _nextV = null;            // We have no more next-key
+      // Attempt to set <_nextK,_nextV> to the next K,V pair.
+      // _nextV is the trigger: stop searching when it is != null
+      if( _idx == -2 ) {        // Check for NO_KEY?
+        _idx = -1;              // Setup for next phase of search
+        _nextK = NO_KEY;  
+        if( (_nextV=get(_nextK)) != null ) return _prevV;
+      }
+      if( _idx == -1 ) {        // Check for CHECK_NEW_TABLE_LONG?
+        _idx = 0;               // Setup for next phase of search
+        _nextK = CHECK_NEW_TABLE_LONG;  _nextV = get(_nextK);
+        if( (_nextV=get(_nextK)) != null ) return _prevV;
+      }
+      while( _idx<length() ) {  // Scan array
+        _nextK = key(_idx++); // Get a key that definitely is in the set (for the moment!)
+        if( _nextK != NO_KEY && // Found something?
+            _nextK != CHECK_NEW_TABLE_LONG &&
+            (_nextV=get(_nextK)) != null )
+          break;                // Got it!  _nextK is a valid Key
+      }                         // Else keep scanning
+      return _prevV;            // Return current value.
+    }
+    public void remove() { 
+      if( _prevV == null ) throw new IllegalStateException();
+      _chm._nbhm.remove(_prevK);
+      _prevV = null;
+    }
+  }
+
+  // --- values --------------------------------------------------------------
+  public Collection<TypeV> values() {
+    return new AbstractCollection<TypeV>() {
+      public void    clear   (          ) {        NonBlockingHashMapLong.this.clear   ( ); }
+      public int     size    (          ) { return NonBlockingHashMapLong.this.size    ( ); }
+      public boolean contains( Object v ) { return NonBlockingHashMapLong.this.containsValue(v); }
+      public Iterator<TypeV> iterator()   { return new SnapshotV(_chm); }
+    };
+  }
+
+  // --- keySet --------------------------------------------------------------
+  class SnapshotK implements Iterator<Long> {
+    final SnapshotV _ss;
+    public SnapshotK(CHM chm) { _ss = new SnapshotV(chm); }
+    public void remove() { _ss.remove(); }
+    public Long next() { _ss.next(); return _ss._nextK; }
+    public boolean hasNext() { return _ss.hasNext(); }
+  }
+  public Set<Long> keySet() {
+    return new AbstractSet<Long> () {
+      public void    clear   (          ) {        NonBlockingHashMapLong.this.clear   ( ); }
+      public int     size    (          ) { return NonBlockingHashMapLong.this.size    ( ); }
+      public boolean contains( Object k ) { return NonBlockingHashMapLong.this.containsKey(k); }
+      public boolean remove  ( Object k ) { return NonBlockingHashMapLong.this.remove  (k) != null; }
+      public Iterator<Long> iterator()    { return new SnapshotK(_chm); }
+    };
+  }
+
+  // --- entrySet ------------------------------------------------------------
+  // --- WriteThroughEntry
+  // The entries returned by entrySet are instances of WriteThroughEntry;
+  // setting into the Map.Entry merely puts a 'put' on the underlying map.
+  // Shamelessly copied from Doug Lea's CHM code.
+  final class WriteThroughEntry	extends AbstractMap.SimpleEntry<Long,TypeV>  {
+    WriteThroughEntry(Long k, TypeV v) { super(k,v); }
+    public TypeV setValue(TypeV value) {
+      if (value == null) throw new NullPointerException();
+      TypeV v = super.setValue(value);
+      NonBlockingHashMapLong.this.put(getKey(), value);
+      return v;
+    }
+  }
+  // Warning: Each call to 'next' in this iterator constructs a new Long and a
+  // new WriteThroughEntry.
+  class SnapshotE implements Iterator<Map.Entry<Long,TypeV>> {
+    final SnapshotV _ss;
+    public SnapshotE(CHM chm) { _ss = new SnapshotV(chm); }
+    public void remove() { _ss.remove(); }
+    public Map.Entry<Long,TypeV> next() { _ss.next(); return new WriteThroughEntry(_ss._nextK,_ss._nextV); }
+    public boolean hasNext() { return _ss.hasNext(); }
+  }
+  public Set<Map.Entry<Long,TypeV>> entrySet() {
+    return new AbstractSet<Map.Entry<Long,TypeV>>() {
+      public void    clear   (          ) {        NonBlockingHashMapLong.this.clear( ); }
+      public int     size    (          ) { return NonBlockingHashMapLong.this.size ( ); }
+      public boolean remove( Object o ) {
+        if (!(o instanceof Map.Entry)) return false;
+        Map.Entry<?,?> e = (Map.Entry<?,?>)o;
+        return NonBlockingHashMapLong.this.remove(e.getKey(), e.getValue());
+      }
+      public boolean contains(Object o) {
+        if (!(o instanceof Map.Entry)) return false;
+        Map.Entry<?,?> e = (Map.Entry<?,?>)o;
+        TypeV v = NonBlockingHashMapLong.this.get(e.getKey());
+        return v != null && v.equals(e.getValue());
+      }
+      public Iterator<Map.Entry<Long,TypeV>> iterator() { return new SnapshotE(_chm); }
+    };
+  }
+
+  // --- writeObject ---------------------------------------------------------
   private void writeObject(java.io.ObjectOutputStream s) throws IOException  {
     s.defaultWriteObject();
     s.writeObject(_val_1);
@@ -779,6 +913,8 @@ public class NonBlockingHashMapLong<TypeV> implements Serializable {
     s.writeLong(NO_KEY);
     s.writeObject(null);
   }
+
+  // --- readObject ----------------------------------------------------------
   private void readObject(java.io.ObjectInputStream s) throws IOException, ClassNotFoundException  {
     s.defaultReadObject();
     _val_1 = (TypeV) s.readObject();

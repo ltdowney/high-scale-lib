@@ -568,6 +568,11 @@ class NBHM_Tester {
       }
     }
 
+    /**
+     * Describe <code>witness</code> method here.
+     *
+     * @return a <code>String</code> value
+     */
     public String witness() {
       S s_old = S.MT;
       S s_new = S.MT;
