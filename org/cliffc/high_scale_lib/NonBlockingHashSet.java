@@ -6,32 +6,24 @@
 package org.cliffc.high_scale_lib;
 import java.util.*;
 
-// A simple wrapper around NonBlockingHashMap making it a Set, with
-// key==value.  After calling the 'immutable' call the existing Set is
-// made immutable (and it's internal format can change to better
-// compress the data).
+// A simple wrapper around NonBlockingHashMap making it a Set.  After calling
+// the 'atomic_immutable' call the existing Set is made immutable (and it's
+// internal format can change to better compress the data).
 
-public class NonBlockingHashSet<E> implements Set<E> {
+public class NonBlockingHashSet<E> extends AbstractSet<E> {
+  static final Object V = new Object();
 
-  private NonBlockingHashMap<E,E> _map;
+  private final NonBlockingHashMap<E,Object> _map;
 
-  public NonBlockingHashSet() { _map = new NonBlockingHashMap<E,E>(); }
+  public NonBlockingHashSet() { super(); _map = new NonBlockingHashMap<E,Object>(); }
 
-  public boolean add        ( final E          o ) { return _map.putIfAbsent(o,o) != o; }
+  public boolean add        ( final E          o ) { return _map.putIfAbsent(o,V) != V; }
   public boolean contains   ( final Object     o ) { return _map.containsKey(o); }
-  public boolean isEmpty    (                    ) { return _map.size() == 0; }
-  public boolean remove     ( final Object     o ) { return _map.remove(o,o) == o; }
+  public boolean remove     ( final Object     o ) { return _map.remove(o) == o; }
   public int     size       (                    ) { return _map.size(); }
   public void    clear      (                    ) { _map.clear(); }
 
   public Iterator<E>iterator(                    ) { return new SetIterator<E>(); }
-
-  public <T> T[] toArray    ( final T[]        a ) { throw new RuntimeException("not implemented"); }
-  public Object[]toArray    (                    ) { throw new RuntimeException("not implemented"); }
-  public boolean addAll     ( final Collection<? extends E> c ) { throw new RuntimeException("not implemented"); }
-  public boolean containsAll( final Collection c ) { throw new RuntimeException("not implemented"); }
-  public boolean removeAll  ( final Collection c ) { throw new RuntimeException("not implemented"); }
-  public boolean retainAll  ( final Collection c ) { throw new RuntimeException("not implemented"); }
 
   // ---
 
@@ -51,8 +43,8 @@ public class NonBlockingHashSet<E> implements Set<E> {
   // (4) start @ random, visit all snapshot, insert live keys
   // (5) CAS _map to null, needs happens-after (4)
   // (6) if Set call sees _map is null, needs happens-after (4) for readers
-  public void immutable() {
-
+  public void atomicImmutable() {
+    throw new RuntimeException("Unimplemented");
   }
 
   // ---
@@ -69,30 +61,30 @@ public class NonBlockingHashSet<E> implements Set<E> {
   // with next() (or by calling remove()), then the iterator is guaranteed to
   // visit all members.  i.e., the Set can be used as a worklist.
   final private class SetIterator<E> implements Iterator<E> {
-    private final NonBlockingHashMap.Snapshot<E,E> _ss;
+    private final NonBlockingHashMap.Snapshot<E,Object> _ss;
     private int _idx;                   // Index
     private Object _next;               // Next found element
-    private Object _toberemoved;
+    private Object _prev;               // Prev element found
     SetIterator() {
       _ss = _map.snapshot();    // Get a snapshot
       next();                   // Setup for 'next' call
     }
     public boolean hasNext() { return _next != null; }
     public void remove() { 
-      if( _toberemoved == null ) throw new IllegalStateException(); 
-      _map.remove(_toberemoved);  
-      _toberemoved = null;
+      if( _prev == null ) throw new IllegalStateException(); 
+      _map.remove(_prev);  
+      _prev = null;
     }
     public E next() { 
       final Object nn = _next;  // The definite 'next' value to be returned
-      if( nn == null ) throw NoSuchElementException();
+      if( nn == null ) throw new NoSuchElementException();
+      _prev = nn;
       _next = null;             // But now find the next 'next'
       while( _idx<_ss.length() ) { // Scan array
-        _next = _ss.key(_idx++);  // Get a key that definitely is in the set (for the moment!)
+        _next = _ss.key(_idx++); // Get a key that definitely is in the set (for the moment!)
         if( _next != null  )    // Found something?
           break;
       }                         // Else keep scanning
-      _toberemoved = nn;
       return (E)nn;             // Return 'next' value.  Note annoying runtime cast.
     }
   }

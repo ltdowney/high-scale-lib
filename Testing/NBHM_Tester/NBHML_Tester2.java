@@ -38,7 +38,7 @@ public class NBHML_Tester2 {
     NonBlockingHashMapLong<String> nbhml = new NonBlockingHashMapLong<String>();
     
     // Drop things into the map
-    long key1 = 1;
+    long key1 = 0;
     nbhml.put(key1, "v1");
     assertNBHMLCheck(nbhml);
     assertEquals(1, nbhml.size());
@@ -56,14 +56,23 @@ public class NBHML_Tester2 {
     assertEquals(2, getIterationSize(nbhml.keySet().iterator()));
     assertEquals(2, getIterationSize(nbhml.entrySet().iterator()));
     
-    nbhml.remove(key1);
     nbhml.remove(key2);
 
     assertNBHMLCheck(nbhml);
+    assertEquals(1, nbhml.size());
+    assertTrue("view sizes should be 1 after remove again", checkViewSizes(1, nbhml));
+    assertEquals(1, getIterationSize(nbhml.values().iterator()));
+    assertEquals(1, getIterationSize(nbhml.keySet().iterator()));
+    assertEquals(1, getIterationSize(nbhml.entrySet().iterator()));
+    
+    nbhml.clear();
+
+    assertNBHMLCheck(nbhml);
     assertEquals(0, nbhml.size());
-    assertTrue("view sizes should be 0 after remove again", checkViewSizes(0, nbhml));
+    assertTrue("view sizes should be 0 after clear again", checkViewSizes(0, nbhml));
     assertEquals(0, getIterationSize(nbhml.values().iterator()));
     assertEquals(0, getIterationSize(nbhml.keySet().iterator()));
     assertEquals(0, getIterationSize(nbhml.entrySet().iterator()));
+    
   }
 }

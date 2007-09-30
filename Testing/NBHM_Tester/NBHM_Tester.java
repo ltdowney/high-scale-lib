@@ -102,27 +102,27 @@ class NBHM_Tester {
   public static final int is_SM(S x,S y) { return _state_machine[x._idx][y._idx]; }
 
 
-  // --- thrd ----------------------------------------------------------------
+  // --- Thrd ----------------------------------------------------------------
   // Notion of an action performed by a single thread, such as 'put(K,A)' or
   // 'delete(K)' - always with respect to key K.  This action will turn into a
   // series of state-machine transitions (or perhaps a request to move to a
   // newer state machine) or 
 
-  public static abstract class thrd {
+  public static abstract class Thrd {
     final String _name;		// Nice thread name
-    final int _tid;		// This thread index; invariant: _thrds[_tid]==this
+    final int _tid;		// This thread index; invariant: _Thrds[_tid]==this
     final boolean _ordered[];	// This thread is ordered after what other threads?
     static int _tids;		// Max number of threads
-    static final thrd[] _thrds = new thrd[10]; // Array of them
+    static final Thrd[] _thrds = new Thrd[10]; // Array of them
     // Thread that can begin at any time
-    thrd( String name ) { 
+    Thrd( String name ) { 
       _tid = _tids++; 
       _name = name; 
       _thrds[_tid] = this; 
       _ordered = null;          // shortcut for un-ordered
     }
     // Thread that must wait until thread t0 has seen 'at_goal'
-    thrd( String name, thrd t0 ) { 
+    Thrd( String name, Thrd t0 ) { 
       _tid = _tids++; 
       _name = name; 
       _thrds[_tid] = this; 
@@ -130,7 +130,7 @@ class NBHM_Tester {
       _ordered[t0._tid] = true;
     }
     // Thread that must wait until threads t0 and t1 have seen 'at_goal'
-    thrd( String name, thrd t0, thrd t1 ) { 
+    Thrd( String name, Thrd t0, Thrd t1 ) { 
       _tid = _tids++; 
       _name = name; 
       _thrds[_tid] = this; 
@@ -143,8 +143,8 @@ class NBHM_Tester {
     //abstract boolean at_goal(History h);
     public String toString() { return _name; }
     // threads cannot start until prior-ordered-threads finish.
-    // passed in an array of active thrds (or NULL)
-    public boolean can_start( thrd[] thrds ) {
+    // passed in an array of active Thrds (or NULL)
+    public boolean can_start( Thrd[] thrds ) {
       if( _ordered == null ) return true;
       for( int i=0; i<thrds.length; i++ )
         if( thrds[i] != null && _ordered[thrds[i]._tid] )
@@ -156,12 +156,12 @@ class NBHM_Tester {
     abstract History step( History h );
   }
 
-  // --- thrd_A --------------------------------------------------------------
-  // A thrd class to do a 'put(A)'
-  public static class thrd_A extends thrd {
-    thrd_A( String n ) { super(n); }
-    thrd_A( String n, thrd t0 ) { super(n,t0); }
-    thrd_A( String n, thrd t0, thrd t1 ) { super(n,t0,t1); }
+  // --- Thrd_A --------------------------------------------------------------
+  // A Thrd class to do a 'put(A)'
+  public static class Thrd_A extends Thrd {
+    Thrd_A( String n ) { super(n); }
+    Thrd_A( String n, Thrd t0 ) { super(n,t0); }
+    Thrd_A( String n, Thrd t0, Thrd t1 ) { super(n,t0,t1); }
     History step( History h ) {
       return step_impl(h,false,h._old);
     }
@@ -192,12 +192,12 @@ class NBHM_Tester {
     }
   }
 
-  // --- thrd_B --------------------------------------------------------------
-  // A thrd class to do a 'put(B)'
-  public static class thrd_B extends thrd {
-    thrd_B( String n ) { super(n); }
-    thrd_B( String n, thrd t0 ) { super(n,t0); }
-    thrd_B( String n, thrd t0, thrd t1 ) { super(n,t0,t1); }
+  // --- Thrd_B --------------------------------------------------------------
+  // A Thrd class to do a 'put(B)'
+  public static class Thrd_B extends Thrd {
+    Thrd_B( String n ) { super(n); }
+    Thrd_B( String n, Thrd t0 ) { super(n,t0); }
+    Thrd_B( String n, Thrd t0, Thrd t1 ) { super(n,t0,t1); }
     History step( History h ) {
       return step_impl(h,false,h._old);
     }
@@ -228,12 +228,12 @@ class NBHM_Tester {
     }
   }
 
-  // --- thrd_del ------------------------------------------------------------
-  // A thrd class to do a 'delete()'
-  public static class thrd_del extends thrd {
-    thrd_del( String n ) { super(n); }
-    thrd_del( String n, thrd t0 ) { super(n,t0); }
-    thrd_del( String n, thrd t0, thrd t1 ) { super(n,t0,t1); }
+  // --- Thrd_del ------------------------------------------------------------
+  // A Thrd class to do a 'delete()'
+  public static class Thrd_del extends Thrd {
+    Thrd_del( String n ) { super(n); }
+    Thrd_del( String n, Thrd t0 ) { super(n,t0); }
+    Thrd_del( String n, Thrd t0, Thrd t1 ) { super(n,t0,t1); }
 
     History step( History h ) {
       return step_impl(h,false,h._old);
@@ -264,12 +264,12 @@ class NBHM_Tester {
     }
   }
 
-  // --- thrd_copy -----------------------------------------------------------
-  // A thrd class to do copy from the old table to the new table
-  public static class thrd_copy extends thrd {
-    thrd_copy( String n ) { super(n); }
-    thrd_copy( String n, thrd t0 ) { super(n,t0); }
-    thrd_copy( String n, thrd t0, thrd t1 ) { super(n,t0,t1); }
+  // --- Thrd_copy -----------------------------------------------------------
+  // A Thrd class to do copy from the old table to the new table
+  public static class Thrd_copy extends Thrd {
+    Thrd_copy( String n ) { super(n); }
+    Thrd_copy( String n, Thrd t0 ) { super(n,t0); }
+    Thrd_copy( String n, Thrd t0, Thrd t1 ) { super(n,t0,t1); }
 
     History step_impl( History h, boolean old_or_new, S sold, S snew ) {
       if( (old_or_new ? h._new : h._old) != sold )
@@ -359,7 +359,7 @@ class NBHM_Tester {
     }
     public boolean old_or_new() { return (_tran & (1<<LOG2TRAN)) != 0; }
     public boolean is_copyread( ) { return tran() == 0; }
-    public Event( thrd_copy copy, boolean old_or_new ) {
+    public Event( Thrd_copy copy, boolean old_or_new ) {
       int tran = 0;
       if( old_or_new ) tran |= (1<<LOG2TRAN); // Mark as a new-transition
       _tran = tran;
@@ -439,7 +439,7 @@ class NBHM_Tester {
 
     // --- History -----------------------------------------------------------
     // Extend an existing history
-    private History(History h, Event e, thrd t) {
+    private History(History h, Event e, Thrd t) {
       assert e.is_copyread() || (e.old_or_new() ? h._new : h._old) == _allowed_transitions[e.tran()];
       int idx = h._events.length;
       //assert (idx == 0) || !e.is_copyread() || !h._events[idx-1].is_copyread() : "no 2 copyreads in a row "+h;
@@ -458,17 +458,17 @@ class NBHM_Tester {
         else                 { _old = _allowed_transitions[e.tran()+1]; _new=h._new; }
       }
     }
-    public History make(Event e, thrd t) { 
+    public History make(Event e, Thrd t) { 
       return new History(this,e,t).canonical(); 
     }
     // Does this history already exist?
-    public History check(Event e, thrd t) { return hash.get(new History(this,e,t)); }
-    public History add_at_goal( thrd t ) {
+    public History check(Event e, Thrd t) { return hash.get(new History(this,e,t)); }
+    public History add_at_goal( Thrd t ) {
       if( _tids.length > 0 ) _tids[_tids.length-1] |= (1<<t._tid);
       return this;
     }
 
-    public History append_copy_reader( thrd_copy t, boolean old_or_new ) {
+    public History append_copy_reader( Thrd_copy t, boolean old_or_new ) {
       Event e = _events[_events.length-1];
       if( e.is_copyread() &&    // Allow more than 1 thread to read at same time
           e.old_or_new() == old_or_new &&
@@ -481,7 +481,7 @@ class NBHM_Tester {
     // --- last_read ---------------------------------------------------------
     // Last value read by this thread for the given FSM.  Only interesting for
     // making changes in the OTHER FSM.
-    public S last_read( thrd_copy copy, boolean old_or_new ) {
+    public S last_read( Thrd_copy copy, boolean old_or_new ) {
       for( int i=_events.length-1; i>=0; i-- ) {
         Event e = _events[i];
         if( e.old_or_new() == old_or_new ) { // Matching FSM
@@ -520,7 +520,7 @@ class NBHM_Tester {
           if( (tids & (1<<t)) != 0 ) {
             tids -= (1<<t);
             if( !first ) str += ",";
-            str += thrd._thrds[t];
+            str += Thrd._thrds[t];
             first = false;
           }
           t++;
@@ -604,11 +604,11 @@ class NBHM_Tester {
     // --- search ------------------------------------------------------------
     // Search the state space for running N threads, each stepping to some
     // goal.  Try stepping each thread 1 step from the current state.
-    public void search(final thrd[] q) {
+    public void search(final Thrd[] q) {
       // Search 1 step for each thread
       boolean all_threads_done = true;
       for( int i=0; i<q.length; i++ ) {
-        thrd T = q[i];
+        Thrd T = q[i];
         if( T == null )         // Can we advance this thread anymore?
           continue;             // Nope
         all_threads_done = false;
@@ -617,7 +617,7 @@ class NBHM_Tester {
 	// Do One Step, unless at-goal already
 	History h = T.at_goal(this) ? this.add_at_goal(T) : T.step(this);
 	// Found a new state; must explore
-	thrd[] r = q.clone();	  // Clone old thread list
+	Thrd[] r = q.clone();	  // Clone old thread list
 	if( T.at_goal(h) )	  // Hit goal?
 	  r[i] = null;		  // No more advance on this thread
 	h.search(r);		  // Search On!
@@ -640,14 +640,14 @@ class NBHM_Tester {
         throw new Error("State "+s+" not reachable from any transition");
 
 
-    thrd a0 = new thrd_A("a0");
-    thrd a1 = new thrd_A("a1");
-    thrd b0 = new thrd_B("b0");
-    thrd d0 = new thrd_del("d0");
-    thrd d1 = new thrd_del("d1");
-    thrd c0 = new thrd_copy("c0");
-    thrd c1 = new thrd_copy("c1");
-    thrd[] thrds = {a0,b0,c0,c1};
+    Thrd a0 = new Thrd_A("a0");
+    Thrd a1 = new Thrd_A("a1");
+    Thrd b0 = new Thrd_B("b0");
+    Thrd d0 = new Thrd_del("d0");
+    Thrd d1 = new Thrd_del("d1");
+    Thrd c0 = new Thrd_copy("c0");
+    Thrd c1 = new Thrd_copy("c1");
+    Thrd[] thrds = {a0,b0,c0,c1};
     History h = History.make();
     h.search(thrds);
 

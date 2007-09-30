@@ -13,7 +13,9 @@ import sun.misc.Unsafe;
 import java.lang.reflect.*;
 //import com.azulsystems.util.Prefetch;
 
-public class NonBlockingHashMapLong<TypeV> implements Map<Long,TypeV>, Serializable {
+public class NonBlockingHashMapLong<TypeV> 
+  extends AbstractMap<Long,TypeV> 
+  implements ConcurrentMap<Long,TypeV>, Serializable {
 
   private static final long serialVersionUID = 1234123412341234124L;
 
@@ -23,15 +25,15 @@ public class NonBlockingHashMapLong<TypeV> implements Map<Long,TypeV>, Serializa
   private static final Unsafe _unsafe = UtilUnsafe.getUnsafe();
   private static final int _Obase  = _unsafe.arrayBaseOffset(Object[].class);
   private static final int _Oscale = _unsafe.arrayIndexScale(Object[].class);
-  private static long rawIndex(Object[] ary, int i) {
-    assert i >= 0 && i < ary.length;
-    return _Obase + i * _Oscale;
+  private static long rawIndex(final Object[] ary, final int idx) {
+    assert idx >= 0 && idx < ary.length;
+    return _Obase + idx * _Oscale;
   }
   private static final int _Lbase  = _unsafe.arrayBaseOffset(long[].class);
   private static final int _Lscale = _unsafe.arrayIndexScale(long[].class);
-  private static long rawIndex(long[] ary, int i) {
-    assert i >= 0 && i < ary.length;
-    return _Lbase + i * _Lscale;
+  private static long rawIndex(final long[] ary, final int idx) {
+    assert idx >= 0 && idx < ary.length;
+    return _Lbase + idx * _Lscale;
   }
 
   // --- Bits to allow Unsafe CAS'ing of the CHM field
@@ -41,24 +43,24 @@ public class NonBlockingHashMapLong<TypeV> implements Map<Long,TypeV>, Serializa
   static {                      // <clinit>
     Field f = null;
     try { f = NonBlockingHashMapLong.class.getDeclaredField("_chm"); } 
-    catch( java.lang.NoSuchFieldException e ) { throw new Error(e); } 
+    catch( java.lang.NoSuchFieldException e ) { throw new RuntimeException(e); } 
     _chm_offset = _unsafe.objectFieldOffset(f);
 
     try { f = NonBlockingHashMapLong.class.getDeclaredField("_val_1"); } 
-    catch( java.lang.NoSuchFieldException e ) { throw new Error(e); } 
+    catch( java.lang.NoSuchFieldException e ) { throw new RuntimeException(e); } 
     _val_1_offset = _unsafe.objectFieldOffset(f);
 
     try { f = NonBlockingHashMapLong.class.getDeclaredField("_val_2"); } 
-    catch( java.lang.NoSuchFieldException e ) { throw new Error(e); } 
+    catch( java.lang.NoSuchFieldException e ) { throw new RuntimeException(e); } 
     _val_2_offset = _unsafe.objectFieldOffset(f);
   }
-  private final boolean CAS( long offset, Object old, Object nnn ) {
+  private final boolean CAS( final long offset, final Object old, final Object nnn ) {
     return _unsafe.compareAndSwapObject(this, offset, old, nnn );
   }
 
   // --- Adding a 'prime' bit onto Values via wrapping with a junk wrapper class
   public static final class Prime {
-    public Object _V;
+    public final Object _V;
     Prime( Object V ) { _V = V; }
     static Object unbox( Object V ) { return V instanceof Prime ? ((Prime)V)._V : V;  }
   }
@@ -105,7 +107,7 @@ public class NonBlockingHashMapLong<TypeV> implements Map<Long,TypeV>, Serializa
     _chm.dump();
     System.out.println("=========");
   }
-  private final static void dump_impl(int i, long K, Object V) { 
+  private final static void dump_impl(final int i, final long K, final Object V) { 
     String KS = (K == CHECK_NEW_TABLE_LONG    ) ? "CHK" : ""+K;
     String p = V instanceof Prime ? "prime_" : "";
     String VS = (V == CHECK_NEW_TABLE_SENTINEL) ? "CHK" : (p+Prime.unbox(V));
@@ -120,7 +122,7 @@ public class NonBlockingHashMapLong<TypeV> implements Map<Long,TypeV>, Serializa
     _chm.dump();
     System.out.println("=========");
   }
-  private final static void dump2_impl(int i, long K, Object V) { 
+  private final static void dump2_impl(final int i, final long K, final Object V) { 
     if( V != null && V != CHECK_NEW_TABLE_SENTINEL && V != TOMBSTONE ) {
       String p = V instanceof Prime ? "prime_" : "";
       String VS = p+Prime.unbox(V);
@@ -136,7 +138,7 @@ public class NonBlockingHashMapLong<TypeV> implements Map<Long,TypeV>, Serializa
   // --- NonBlockingHashMap --------------------------------------------------
   // Constructors
   public NonBlockingHashMapLong( ) { this(MIN_SIZE); }
-  public NonBlockingHashMapLong( int initial_sz ) { 
+  public NonBlockingHashMapLong( final int initial_sz ) { 
     if( initial_sz < 0 ) throw new IllegalArgumentException();
     int i;                      // Convert to next largest power-of-2
     for( i=MIN_SIZE_LOG; (1<<i) < initial_sz; i++ ) ;
@@ -171,6 +173,8 @@ public class NonBlockingHashMapLong<TypeV> implements Map<Long,TypeV>, Serializa
     CHM newchm = new CHM(this,MIN_SIZE_LOG);
     while( !CAS(_chm_offset,_chm,newchm) ) // Spin until the clear works
       ;
+    CAS(_val_1_offset,_val_1,null);
+    CAS(_val_2_offset,_val_2,null);
   }
 
   private final Object putIfMatch( Object curVal, TypeV val, Object expVal, long off ) {
@@ -201,15 +205,14 @@ public class NonBlockingHashMapLong<TypeV> implements Map<Long,TypeV>, Serializa
     return V == TOMBSTONE ? null : (TypeV)V;
   }
 
-  public TypeV get   ( Object key ) { return (key instanceof Long) ? get   (((Long)key).longValue()) : null;  }
-  public TypeV remove( Object key ) { return (key instanceof Long) ? remove(((Long)key).longValue()) : null;  }
-  public boolean remove( Object key, Object Val ) { return (key instanceof Long) ? remove(((Long)key).longValue(), Val) : false;  }
-  public boolean containsKey( Object key ) { return (key instanceof Long) ? containsKey(((Long)key).longValue()) : false; }
+  public TypeV   get    ( Object key              ) { return (key instanceof Long) ? get    (((Long)key).longValue()) : null;  }
+  public TypeV   remove ( Object key              ) { return (key instanceof Long) ? remove (((Long)key).longValue()) : null;  }
+  public boolean remove ( Object key, Object Val  ) { return (key instanceof Long) ? remove (((Long)key).longValue(), Val) : false;  }
+  public TypeV   replace( Long key, TypeV Val     ) { return (key instanceof Long) ? replace(((Long)key).longValue(), Val) : null;  }
+  public boolean replace( Long key, TypeV oldValue, TypeV newValue ) { return (key instanceof Long) ? replace(((Long)key).longValue(), oldValue, newValue) : false;  }
+  public TypeV   putIfAbsent( Long key, TypeV val ) { return (key instanceof Long) ? (TypeV)putIfMatch( ((Long)key).longValue(),  val, null ) : null;  }
+  public boolean containsKey( Object key          ) { return (key instanceof Long) ? containsKey(((Long)key).longValue()) : false; }
   public TypeV put( Long key, TypeV val ) { return put(key.longValue(),val); }
-
-  public void putAll(Map<? extends Long,? extends TypeV> t) {
-    throw new Error("Unimplemented");
-  }
 
   // --- help_copy ---------------------------------------------------------
   // Help along an existing resize operation.  This is just a fast cut-out
@@ -652,7 +655,7 @@ public class NonBlockingHashMapLong<TypeV> implements Map<Long,TypeV>, Serializa
       while( !_copyDoneUpdater.compareAndSet(this,copyDone,copyDone+workdone) ) 
         copyDone = _copyDone;   // Reload, retry
       if( copyDone+workdone > _keys.length )
-        throw new Error("too much copyDone:"+copyDone+" work="+workdone+" > len="+_keys.length);
+        throw new RuntimeException("too much copyDone:"+copyDone+" work="+workdone+" > len="+_keys.length);
       assert (copyDone+workdone) <= _keys.length;
       // Check for copy being ALL done, and promote
       if( copyDone+workdone == _keys.length ) {
@@ -722,7 +725,7 @@ public class NonBlockingHashMapLong<TypeV> implements Map<Long,TypeV>, Serializa
           long nano = System.nanoTime();
           long slots= newchm.slots();
           System.out.println(""+nano+" copy oldslot="+idx+"/"+_keys.length+" K="+K+" no_slot="+cnt+"/"+len+" slots="+slots+" live="+_nbhm.size()+"");
-          throw new Error();
+          throw new RuntimeException("some kind of table copy resizing error");
         }
         hash = (hash+1)&(len-1); // Reprobe!
       }
@@ -802,9 +805,10 @@ public class NonBlockingHashMapLong<TypeV> implements Map<Long,TypeV>, Serializa
       // some other thread deleted the last value.  Instead, 'next'
       // spends all its effort finding the key that comes after the
       // 'next' key.
-      if( _idx != -2 && _nextV == null ) throw new IllegalStateException();
+      TypeV currV = _nextV;
+      if( _idx != -2 && currV == null ) throw new NoSuchElementException();
       _prevK = _nextK;          // This will become the previous key
-      _prevV = _nextV;          // This will become the previous value
+      _prevV =  currV;          // This will become the previous value
       _nextV = null;            // We have no more next-key
       // Attempt to set <_nextK,_nextV> to the next K,V pair.
       // _nextV is the trigger: stop searching when it is != null
@@ -825,7 +829,7 @@ public class NonBlockingHashMapLong<TypeV> implements Map<Long,TypeV>, Serializa
             (_nextV=get(_nextK)) != null )
           break;                // Got it!  _nextK is a valid Key
       }                         // Else keep scanning
-      return _prevV;            // Return current value.
+      return currV;             // Return current value.
     }
     public void remove() { 
       if( _prevV == null ) throw new IllegalStateException();
