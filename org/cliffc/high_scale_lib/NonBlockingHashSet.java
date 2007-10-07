@@ -23,7 +23,7 @@ public class NonBlockingHashSet<E> extends AbstractSet<E> {
   public int     size       (                    ) { return _map.size(); }
   public void    clear      (                    ) { _map.clear(); }
 
-  public Iterator<E>iterator(                    ) { return new SetIterator<E>(); }
+  public Iterator<E>iterator(                    ) { return _map.keySet().iterator(); }
 
   // ---
 
@@ -45,47 +45,5 @@ public class NonBlockingHashSet<E> extends AbstractSet<E> {
   // (6) if Set call sees _map is null, needs happens-after (4) for readers
   public void atomicImmutable() {
     throw new RuntimeException("Unimplemented");
-  }
-
-  // ---
-  // This iterator is NOT multi-threaded safe per-se.  Multiple callers of the
-  // same iterator will confuse the underlying variables and can crash the
-  // Iterator.  
-
-  // The Iterator only guarantees to visit those elements that exist over the
-  // entire lifetime of iteration.  Even if this iterator is always called
-  // single-threaded, the underlying Set can be concurrently modified.
-  // Elements inserted or removed during iteration (by this or another thread)
-  // may or may not be visited.  However, if no other thread is modifying the
-  // set and this thread is not adding members and only deleting members found
-  // with next() (or by calling remove()), then the iterator is guaranteed to
-  // visit all members.  i.e., the Set can be used as a worklist.
-  final private class SetIterator<E> implements Iterator<E> {
-    private final NonBlockingHashMap.Snapshot<E,Object> _ss;
-    private int _idx;                   // Index
-    private Object _next;               // Next found element
-    private Object _prev;               // Prev element found
-    SetIterator() {
-      _ss = _map.snapshot();    // Get a snapshot
-      next();                   // Setup for 'next' call
-    }
-    public boolean hasNext() { return _next != null; }
-    public void remove() { 
-      if( _prev == null ) throw new IllegalStateException(); 
-      _map.remove(_prev);  
-      _prev = null;
-    }
-    public E next() { 
-      final Object nn = _next;  // The definite 'next' value to be returned
-      if( nn == null ) throw new NoSuchElementException();
-      _prev = nn;
-      _next = null;             // But now find the next 'next'
-      while( _idx<_ss.length() ) { // Scan array
-        _next = _ss.key(_idx++); // Get a key that definitely is in the set (for the moment!)
-        if( _next != null  )    // Found something?
-          break;
-      }                         // Else keep scanning
-      return (E)nn;             // Return 'next' value.  Note annoying runtime cast.
-    }
   }
 }

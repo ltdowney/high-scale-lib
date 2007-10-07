@@ -51,12 +51,13 @@ public class nbhs_tester extends Thread {
 
   static void print(NonBlockingHashSet<String> nbhs) throws Exception {
     int size = nbhs.size();
-    System.out.print("set["+size+"]={");
+    System.out.print("set["+size+"]=");
     if( (size==0) != nbhs.isEmpty() )
       throw new Exception("size="+size+", isEmpty="+nbhs.isEmpty());
-    for( int i=0; i<ss.length; i++ )
-      if( nbhs.contains(ss[i]) )
-        System.out.print(""+ss[i]+",");
-    System.out.println("}");
+    System.out.println(nbhs);
+    //for( int i=0; i<ss.length; i++ )
+    //  if( nbhs.contains(ss[i]) )
+    //    System.out.print(""+ss[i]+",");
+    //System.out.println("}");
   }
 }

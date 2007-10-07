@@ -13,8 +13,9 @@ import sun.misc.Unsafe;
 import java.lang.reflect.*;
 //import com.azulsystems.util.Prefetch;
 
-public class NonBlockingHashMap<TypeK, TypeV> extends AbstractMap<TypeK,TypeV> 
-        implements ConcurrentMap<TypeK, TypeV>, Serializable {
+public class NonBlockingHashMap<TypeK, TypeV> 
+  extends AbstractMap<TypeK,TypeV> 
+  implements ConcurrentMap<TypeK, TypeV>, Serializable {
 
   private static final long serialVersionUID = 1234123412341234123L;
 
@@ -29,7 +30,7 @@ public class NonBlockingHashMap<TypeK, TypeV> extends AbstractMap<TypeK,TypeV>
     return _Obase + i * _Oscale;
   }
 
-  private final static long _kvs_offset;
+  private static final long _kvs_offset;
   static {                      // <clinit>
     Field f = null;
     try { 
@@ -53,14 +54,11 @@ public class NonBlockingHashMap<TypeK, TypeV> extends AbstractMap<TypeK,TypeV>
   // Slot 0 is always used for a 'CHM' entry below to hold the interesting
   // bits of the hash table.  Slot 1 holds full hashes.  Slots {2,3}, {4,5},
   // etc hold {Key,Value} pairs.
-  public Object[] _kvs;
+  private transient Object[] _kvs;
   private static final CHM   chm   (Object[] kvs) { return (CHM  )kvs[0]; }
   private static final int[] hashes(Object[] kvs) { return (int[])kvs[1]; }
   // Number of K,V pairs in the table
   public static final int len(Object[] kvs) { return (kvs.length-2)>>1; }
-
-  // API bits for the JDK classes
-  transient Set<Map.Entry<TypeK,TypeV>> _entrySet;
 
   // --- Some misc minimum table size and Sentiel
   private static final int MIN_SIZE_LOG=5;
@@ -201,6 +199,9 @@ public class NonBlockingHashMap<TypeK, TypeV> extends AbstractMap<TypeK,TypeV>
   public NonBlockingHashMap( ) { this(MIN_SIZE); }
   public NonBlockingHashMap( int initial_sz ) { this(initial_sz,true); }
   public NonBlockingHashMap( int initial_sz, boolean memoize_hashes ) { 
+    initialize(initial_sz,memoize_hashes);
+  }
+  void initialize(int initial_sz, boolean memoize_hashes ) { 
     if( initial_sz < 0 ) throw new IllegalArgumentException();
     int i;                      // Convert to next largest power-of-2
     for( i=MIN_SIZE_LOG; (1<<i) < initial_sz; i++ ) ;
@@ -806,281 +807,144 @@ public class NonBlockingHashMap<TypeK, TypeV> extends AbstractMap<TypeK,TypeV>
   }
 
   // --- Snapshot ------------------------------------------------------------
-  public Snapshot snapshot() { return new Snapshot<TypeK,TypeV>(_kvs); }
-
-  static class Snapshot<TypeK,TypeV> {
+  class SnapshotV implements Iterator<TypeV> {
     final Object[] _kvs;
-    public Snapshot(Object[] kvs) { _kvs = kvs; }
+    public SnapshotV(Object[] kvs) { _kvs = kvs; next(); }
     int length() { return len(_kvs); }
     Object key(int idx) { return NonBlockingHashMap.key(_kvs,idx); }
+    private int _idx;           // 0-keys.length
+    private Object _nextK, _prevK; // Last 2 keys found
+    private TypeV  _nextV, _prevV; // Last 2 values found
+    public boolean hasNext() { return _nextV != null; }
+    public TypeV next() {
+      // 'next' actually knows what the next value will be - it had to
+      // figure that out last go-around lest 'hasNext' report true and
+      // some other thread deleted the last value.  Instead, 'next'
+      // spends all its effort finding the key that comes after the
+      // 'next' key.
+      TypeV currV = _nextV;
+      if( _idx != 0 && currV == null ) throw new NoSuchElementException();
+      _prevK = _nextK;          // This will become the previous key
+      _prevV =  currV;          // This will become the previous value
+      _nextV = null;            // We have no more next-key
+      // Attempt to set <_nextK,_nextV> to the next K,V pair.
+      // _nextV is the trigger: stop searching when it is != null
+      while( _idx<length() ) {  // Scan array
+        _nextK = key(_idx++); // Get a key that definitely is in the set (for the moment!)
+        if( _nextK != null && // Found something?
+            _nextK != CHECK_NEW_TABLE_SENTINEL &&
+            (_nextV=get(_nextK)) != null )
+          break;                // Got it!  _nextK is a valid Key
+      }                         // Else keep scanning
+      return currV;             // Return current value.
+    }
+    public void remove() { 
+      if( _prevV == null ) throw new IllegalStateException();
+      putIfMatch( _kvs, _prevK, null, _prevV );
+      _prevV = null;
+    }
   }
 
-  //
-  // Starting from here to the end, this code was shamelessly copied from 
-  // Doug Lea's ConcurrentHashMap.
-  //
-  // I made minor edits to fit the iteration semantics to my HashTable and to
-  // coding style - Cliff Click
+  // --- values --------------------------------------------------------------
+  public Collection<TypeV> values() {
+    return new AbstractCollection<TypeV>() {
+      public void    clear   (          ) {        NonBlockingHashMap.this.clear   ( ); }
+      public int     size    (          ) { return NonBlockingHashMap.this.size    ( ); }
+      public boolean contains( Object v ) { return NonBlockingHashMap.this.containsValue(v); }
+      public Iterator<TypeV> iterator()   { return new SnapshotV(_kvs); }
+    };
+  }
+
+  // --- keySet --------------------------------------------------------------
+  class SnapshotK implements Iterator<TypeK> {
+    final SnapshotV _ss;
+    public SnapshotK(Object[] kvs) { _ss = new SnapshotV(kvs); }
+    public void remove() { _ss.remove(); }
+    public TypeK next() { _ss.next(); return (TypeK)_ss._nextK; }
+    public boolean hasNext() { return _ss.hasNext(); }
+  }
+  public Set<TypeK> keySet() {
+    return new AbstractSet<TypeK> () {
+      public void    clear   (          ) {        NonBlockingHashMap.this.clear   ( ); }
+      public int     size    (          ) { return NonBlockingHashMap.this.size    ( ); }
+      public boolean contains( Object k ) { return NonBlockingHashMap.this.containsKey(k); }
+      public boolean remove  ( Object k ) { return NonBlockingHashMap.this.remove  (k) != null; }
+      public Iterator<TypeK> iterator()    { return new SnapshotK(_kvs); }
+    };
+  }
 
   // --- entrySet ------------------------------------------------------------
-  public Set<Map.Entry<TypeK, TypeV>> entrySet() {
-    Set<Map.Entry<TypeK,TypeV>> es = _entrySet;
-    return (es != null) ? es : (_entrySet = (Set<Map.Entry<TypeK,TypeV>>) (Set) new EntrySet());
-  }
-
-  // --- EntrySet ------------------------------------------------------------
-  final class EntrySet extends AbstractSet<Map.Entry<TypeK,TypeV>> {
-    public Iterator<Map.Entry<TypeK,TypeV>> iterator() {
-      return new EntryIterator();
-    }
-    public boolean contains(Object o) {
-      if (!(o instanceof Map.Entry))
-        return false;
-      Map.Entry<TypeK,TypeV> e = (Map.Entry<TypeK,TypeV>)o;
-      TypeV v = NonBlockingHashMap.this.get(e.getKey());
-      return v != null && v.equals(e.getValue());
-    }
-    public boolean remove(Object o) {
-      if (!(o instanceof Map.Entry))
-        return false;
-      Map.Entry<TypeK,TypeV> e = (Map.Entry<TypeK,TypeV>)o;
-      return NonBlockingHashMap.this.remove(e.getKey(), e.getValue());
-    }
-    public int size() {
-      return NonBlockingHashMap.this.size();
-    }
-    public void clear() {
-      NonBlockingHashMap.this.clear();
-    }
-    public Object[] toArray() {
-      // Since we don't ordinarily have distinct Entry objects, we
-      // must pack elements using exportable SimpleEntry
-      Collection<Map.Entry<TypeK,TypeV>> c = new ArrayList<Map.Entry<TypeK,TypeV>>(size());
-      for (Iterator<Map.Entry<TypeK,TypeV>> i = iterator(); i.hasNext(); )
-        c.add(new SimpleEntry<TypeK,TypeV>(i.next()));
-      return c.toArray();
-    }
-    public <T> T[] toArray(T[] a) {
-      Collection<Map.Entry<TypeK,TypeV>> c = new ArrayList<Map.Entry<TypeK,TypeV>>(size());
-      for (Iterator<Map.Entry<TypeK,TypeV>> i = iterator(); i.hasNext(); )
-        c.add(new SimpleEntry<TypeK,TypeV>(i.next()));
-      return c.toArray(a);
+  // --- WriteThroughEntry
+  // The entries returned by entrySet are instances of WriteThroughEntry;
+  // setting into the Map.Entry merely puts a 'put' on the underlying map.
+  // Shamelessly copied from Doug Lea's CHM code.
+  final class WriteThroughEntry	extends AbstractMap.SimpleEntry<TypeK,TypeV>  {
+    WriteThroughEntry(TypeK k, TypeV v) { super(k,v); }
+    public TypeV setValue(TypeV value) {
+      if (value == null) throw new NullPointerException();
+      TypeV v = super.setValue(value);
+      NonBlockingHashMap.this.put(getKey(), value);
+      return v;
     }
   }
-
-  public Enumeration<TypeK> keys() { return new KeyIterator(); }
-  public Enumeration<TypeV> elements() { return new ValueIterator(); }
-
-  // --- HashIterator --------------------------------------------------------
-  abstract class HashIterator {
-    final Object[] _currentTable;
-    int _nextIdx;
-    TypeK _lastK, _nextK;
-    TypeV _lastV, _nextV;
-
-    HashIterator() {
-      _currentTable = _kvs;
-      advance();
-    }
-    
-    public boolean hasMoreElements() { return hasNext(); }
-    public boolean hasNext() { return _nextK != null; }
-    
-    protected final void advance() {
-      _lastK = _nextK;
-      _lastV = _nextV;
-      int len = len(_currentTable);
-
-      while( _nextIdx < len ) {
-        _nextK = (TypeK)key(_currentTable,_nextIdx);
-        _nextV = (TypeV)val(_currentTable,_nextIdx);
-        _nextIdx++;
-        if( _nextK != null && _nextV != null ) 
-          return;
+  // Warning: Each call to 'next' in this iterator constructs a new WriteThroughEntry.
+  class SnapshotE implements Iterator<Map.Entry<TypeK,TypeV>> {
+    final SnapshotV _ss;
+    public SnapshotE(Object[] kvs) { _ss = new SnapshotV(kvs); }
+    public void remove() { _ss.remove(); }
+    public Map.Entry<TypeK,TypeV> next() { _ss.next(); return new WriteThroughEntry((TypeK)_ss._prevK,_ss._prevV); }
+    public boolean hasNext() { return _ss.hasNext(); }
+  }
+  public Set<Map.Entry<TypeK,TypeV>> entrySet() {
+    return new AbstractSet<Map.Entry<TypeK,TypeV>>() {
+      public void    clear   (          ) {        NonBlockingHashMap.this.clear( ); }
+      public int     size    (          ) { return NonBlockingHashMap.this.size ( ); }
+      public boolean remove( Object o ) {
+        if (!(o instanceof Map.Entry)) return false;
+        Map.Entry<?,?> e = (Map.Entry<?,?>)o;
+        return NonBlockingHashMap.this.remove(e.getKey(), e.getValue());
       }
-      _nextK = null;
-      _nextV = null;
-    }
-    
-    public void remove() {
-      if (_lastK == null)
-        throw new IllegalStateException();
-      NonBlockingHashMap.this.remove(_lastK);
-      _lastK = null;
-    }
+      public boolean contains(Object o) {
+        if (!(o instanceof Map.Entry)) return false;
+        Map.Entry<?,?> e = (Map.Entry<?,?>)o;
+        TypeV v = NonBlockingHashMap.this.get(e.getKey());
+        return v != null && v.equals(e.getValue());
+      }
+      public Iterator<Map.Entry<TypeK,TypeV>> iterator() { return new SnapshotE(_kvs); }
+    };
   }
 
-  // --- KeyIterator ---------------------------------------------------------
-  final class KeyIterator extends HashIterator implements Iterator<TypeK>, Enumeration<TypeK> {
-    public TypeK nextElement() { return next(); }
-    public TypeK next() { 
-      if (_nextK == null)
-        throw new NoSuchElementException();
-      advance();
-      return _lastK;
-    }
-  }
-  
-  // --- ValueIterator --------------------------------------------------------
-  final class ValueIterator extends HashIterator implements Iterator<TypeV>, Enumeration<TypeV> {
-    public TypeV nextElement() { return next(); }
-    public TypeV next() { 
-      if (_nextV == null)
-        throw new NoSuchElementException();
-      advance();
-      return _lastV;
-    }
-  }
-
-  // --- HashIterator ---------------------------------------------------------
-  final class EntryIterator extends HashIterator implements Map.Entry<TypeK,TypeV>, Iterator<Entry<TypeK,TypeV>> {
-    public Map.Entry<TypeK,TypeV> next() {
-      Map.Entry<TypeK,TypeV> e = new SimpleEntry<TypeK,TypeV>(_nextK,_nextV);
-      advance();
-      return e;
-    }
-    
-    public TypeK getKey() {
-      if (_lastK == null)
-        throw new IllegalStateException("Entry was removed");
-      return _lastK;
-    }
-
-    public TypeV getValue() {
-      if (_lastK == null)
-        throw new IllegalStateException("Entry was removed");
-      return NonBlockingHashMap.this.get(_lastK);
-    }
-    
-    public TypeV setValue(TypeV value) {
-      if (_lastK == null)
-        throw new IllegalStateException("Entry was removed");
-      return NonBlockingHashMap.this.put(_lastK, value);
-    }
-    
-    public boolean equals(Object o) {
-      // If not acting as entry, just use default.
-      if (_lastK == null)
-        return super.equals(o);
-      if (!(o instanceof Map.Entry))
-        return false;
-      Map.Entry e = (Map.Entry)o;
-      return eq(getKey(), e.getKey()) && eq(getValue(), e.getValue());
-    }
-    
-    public int hashCode() {
-      // If not acting as entry, just use default.
-      if (_nextK == null)
-        return super.hashCode();
-      
-      Object k = getKey();
-      Object v = getValue();
-      return 
-        ((k == null) ? 0 : k.hashCode()) ^
-        ((v == null) ? 0 : v.hashCode());
-    }
-    
-    public String toString() {
-      // If not acting as entry, just use default.
-      if (_lastK == null)
-        return super.toString();
-      else
-        return getKey() + "=" + getValue();
-    }
-    
-    boolean eq(Object o1, Object o2) {
-      return (o1 == null ? o2 == null : o1.equals(o2));
-    }
-  }
-    
-  // --- SimpleEntry ---------------------------------------------------------
-  /**
-   * This duplicates java.util.AbstractMap.SimpleEntry until this class
-   * is made accessible.
-   */
-  static final class SimpleEntry<TypeK,TypeV> implements Entry<TypeK,TypeV> {
-    TypeK key;
-    TypeV value;
-    
-    public SimpleEntry(TypeK key, TypeV value) {
-      this.key   = key;
-      this.value = value;
-    }
-    
-    public SimpleEntry(Entry<TypeK,TypeV> e) {
-      this.key   = e.getKey();
-      this.value = e.getValue();
-    }
-    
-    public TypeK getKey() {
-      return key;
-    }
-    
-    public TypeV getValue() {
-      return value;
-    }
-    
-    public TypeV setValue(TypeV value) {
-      TypeV oldValue = this.value;
-      this.value = value;
-      return oldValue;
-    }
-    
-    public boolean equals(Object o) {
-      if (!(o instanceof Map.Entry))
-        return false;
-      Map.Entry e = (Map.Entry)o;
-      return eq(key, e.getKey()) && eq(value, e.getValue());
-    }
-    
-    public int hashCode() {
-      return ((key   == null)   ? 0 :   key.hashCode()) ^
-        ((value == null)   ? 0 : value.hashCode());
-    }
-
-    public String toString() {
-      return key + "=" + value;
-    }
-    
-    static boolean eq(Object o1, Object o2) {
-      return (o1 == null ? o2 == null : o1.equals(o2));
-    }
-  }
-
-  /* ---------------- Serialization Support -------------- */
   // --- writeObject -------------------------------------------------------
-  // Write a NonBlockingHashMap to a stream
+  // Write a NBMH to a stream
   private void writeObject(java.io.ObjectOutputStream s) throws IOException  {
-    s.defaultWriteObject();
-    // Load once the Hashtable being serialized.  During a race with resizing
-    // this can change.  Basically, we snapshot the current table.
-    Object[] kvs = _kvs;        // The hashtable being serialized. 
+    s.defaultWriteObject();     // Nothing to write
+    s.writeBoolean( _kvs[1] != null );
+    final Object[] kvs = _kvs;  // The One Field is transient
     for( int i=0; i<len(kvs); i++ ) {
-      Object K = key(kvs,i);
+      final Object K = key(kvs,i);
       if( K != null && K != CHECK_NEW_TABLE_SENTINEL ) { // Only serialize keys in this table
-        Object V = get(K);      // But do an official 'get' in case key is being copied
-        if( V != null ) {       // Key might have been deleted
-          s.writeObject(K);
+        final Object V = get(K); // But do an official 'get' in case key is being copied
+        if( V != null ) {     // Key might have been deleted
+          s.writeObject(K);   // Write the <TypeK,TypeV> pair
           s.writeObject(V);
         }
       }
     }
-    s.writeObject(null);        // Write 'null key' sentinel to signal end
+    s.writeObject(null);      // Sentinel to indicate end-of-data
     s.writeObject(null);
   }
-    
+  
   // --- readObject --------------------------------------------------------
-  // Create a NonBlockingHashMap from a stream
+  // Read a CHM from a stream
   private void readObject(java.io.ObjectInputStream s) throws IOException, ClassNotFoundException  {
-    s.defaultReadObject();
-    
-    // Read the keys and values, and put the mappings in the table
-    while( true ) {
-      TypeK key = (TypeK) s.readObject();
-      TypeV val = (TypeV) s.readObject();
-      if (key == null)  break;
-      put(key, val);
+    s.defaultReadObject();      // Read nothing
+    boolean memoize = s.readBoolean();
+    initialize(MIN_SIZE,memoize);
+    for (;;) {
+      final TypeK K = (TypeK) s.readObject();
+      final TypeV V = (TypeV) s.readObject();
+      if( K == null ) break;
+      put(K,V);                 // Insert with an offical put
     }
   }
-
-}
+} // End NonBlockingHashMap class
