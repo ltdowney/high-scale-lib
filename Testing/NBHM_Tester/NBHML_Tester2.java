@@ -1,5 +1,6 @@
 import org.cliffc.high_scale_lib.*;
 import java.util.*;
+import java.io.*;
 
 public class NBHML_Tester2 {
   public static void main(String args[]) {
@@ -30,6 +31,9 @@ public class NBHML_Tester2 {
   private void assertEquals( int x, int y ) {
     if( x != y ) throw new Error(""+x+" != "+y);
   }
+  private void assertEquals( String x, String y ) {
+    if( !x.equals(y) ) throw new Error(""+x+" != "+y);
+  }
   private void assertTrue( String s, boolean P ) {
     if( !P ) throw new Error(s);
   }
@@ -55,7 +59,34 @@ public class NBHML_Tester2 {
     assertEquals(2, getIterationSize(nbhml.values().iterator()));
     assertEquals(2, getIterationSize(nbhml.keySet().iterator()));
     assertEquals(2, getIterationSize(nbhml.entrySet().iterator()));
-    
+
+    assertEquals(nbhml.toString(),"{99=v2, 0=null}");
+
+    // Serialize it out
+    try {
+      FileOutputStream fos = new FileOutputStream("NBHML_test.txt");
+      ObjectOutputStream out = new ObjectOutputStream(fos);
+      out.writeObject(nbhml);
+      out.close();
+    } catch(IOException ex) {
+      ex.printStackTrace();
+    }
+
+    // Read it back
+    try {
+      FileInputStream fis = new FileInputStream("NBHML_test.txt");
+      ObjectInputStream in = new ObjectInputStream(fis);
+      NonBlockingHashMapLong nbhml2 = (NonBlockingHashMapLong)in.readObject();
+      in.close();
+      assertEquals(nbhml.toString(),nbhml2.toString());
+      nbhml = nbhml2;           // Use the de-serialized version
+    } catch(IOException ex) {
+      ex.printStackTrace();
+    } catch(ClassNotFoundException ex) {
+      ex.printStackTrace();
+    }
+  
+    // Now begin removing keys and testing
     nbhml.remove(key2);
 
     assertNBHMLCheck(nbhml);

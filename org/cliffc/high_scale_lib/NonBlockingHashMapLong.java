@@ -37,9 +37,9 @@ public class NonBlockingHashMapLong<TypeV>
   }
 
   // --- Bits to allow Unsafe CAS'ing of the CHM field
-  private final static long _chm_offset;
-  private final static long _val_1_offset;
-  private final static long _val_2_offset;
+  private static final long _chm_offset;
+  private static final long _val_1_offset;
+  private static final long _val_2_offset;
   static {                      // <clinit>
     Field f = null;
     try { f = NonBlockingHashMapLong.class.getDeclaredField("_chm"); } 
@@ -74,7 +74,7 @@ public class NonBlockingHashMapLong<TypeV>
   }
 
   // --- The Hash Table
-  public CHM _chm;
+  public transient CHM _chm;
   // These next 2 keys allow me to have special sentinel values for some long
   // Keys, especially key 0 which is the default value for a new Java array.
   // These key/value slots exist always, but the key is assumed.  The Value is
@@ -85,19 +85,19 @@ public class NonBlockingHashMapLong<TypeV>
   public TypeV _val_2;          // Value for Key: CHECK_NEW_TABLE_SENTINEL
 
   // Size in active K,V pairs in all nested CHM's
-  private final ConcurrentAutoTable _size;
+  private transient ConcurrentAutoTable _size;
 
   // --- Some misc minimum table size and Sentiel
   private static final int MIN_SIZE_LOG=5;
   private static final int MIN_SIZE=(1<<MIN_SIZE_LOG); // Must be power of 2
 
-  public static final long NO_KEY = 0L;
-  public static final long CHECK_NEW_TABLE_LONG = -1L;
+  private static final long NO_KEY = 0L;
+  private static final long CHECK_NEW_TABLE_LONG = -1L;
 
-  public static final Object CHECK_NEW_TABLE_SENTINEL = new Object(); // Sentinel
-  public static final Object NO_MATCH_OLD = new Object(); // Sentinel
-  public static final Object TOMBSTONE = new Object();
-  public static final Prime  TOMBPRIME = new Prime(TOMBSTONE);
+  private static final Object CHECK_NEW_TABLE_SENTINEL = new Object(); // Sentinel
+  private static final Object NO_MATCH_OLD = new Object(); // Sentinel
+  private static final Object TOMBSTONE = new Object();
+  private static final Prime  TOMBPRIME = new Prime(TOMBSTONE);
 
   // --- dump ----------------------------------------------------------------
   public final void dump() { 
@@ -107,7 +107,7 @@ public class NonBlockingHashMapLong<TypeV>
     _chm.dump();
     System.out.println("=========");
   }
-  private final static void dump_impl(final int i, final long K, final Object V) { 
+  private static final void dump_impl(final int i, final long K, final Object V) { 
     String KS = (K == CHECK_NEW_TABLE_LONG    ) ? "CHK" : ""+K;
     String p = V instanceof Prime ? "prime_" : "";
     String VS = (V == CHECK_NEW_TABLE_SENTINEL) ? "CHK" : (p+Prime.unbox(V));
@@ -122,7 +122,7 @@ public class NonBlockingHashMapLong<TypeV>
     _chm.dump();
     System.out.println("=========");
   }
-  private final static void dump2_impl(final int i, final long K, final Object V) { 
+  private static final void dump2_impl(final int i, final long K, final Object V) { 
     if( V != null && V != CHECK_NEW_TABLE_SENTINEL && V != TOMBSTONE ) {
       String p = V instanceof Prime ? "prime_" : "";
       String VS = p+Prime.unbox(V);
@@ -218,7 +218,7 @@ public class NonBlockingHashMapLong<TypeV>
   // Help along an existing resize operation.  This is just a fast cut-out
   // wrapper, to encourage inlining for the fast no-copy-in-progress case.
   private final void help_copy( ) {
-    CHM topchm = _chm;
+    final CHM topchm = _chm;
     if( topchm._newchm != null )
       topchm.help_copy_impl(false);
   }
@@ -770,23 +770,6 @@ public class NonBlockingHashMapLong<TypeV>
       }
       return did_work;
     } // end copy_one
-
-    // --- writeObject -------------------------------------------------------
-    // Write a CHM to a stream
-    private void writeObject(java.io.ObjectOutputStream s) throws IOException  {
-      s.defaultWriteObject();
-      for( int i=0; i<_keys.length; i++ ) {
-        long K = _keys[i];
-        if( K != NO_KEY && K != CHECK_NEW_TABLE_LONG ) { // Only serialize keys in this table
-          Object V = _nbhm.get(K);    // But do an official 'get' in case key is being copied
-          if( V != null ) {     // Key might have been deleted
-            s.writeLong  (K);   // Write the <long,TypeV> pair
-            s.writeObject(V);
-          }
-        }
-      }
-    }
-  
   } // End CHM class
 
   // --- Snapshot ------------------------------------------------------------
@@ -908,27 +891,37 @@ public class NonBlockingHashMapLong<TypeV>
     };
   }
 
-  // --- writeObject ---------------------------------------------------------
+  // --- writeObject -------------------------------------------------------
+  // Write a NBMHL to a stream
   private void writeObject(java.io.ObjectOutputStream s) throws IOException  {
-    s.defaultWriteObject();
-    s.writeObject(_val_1);
-    s.writeObject(_val_2);
-    s.writeObject(_chm);
-    s.writeLong(NO_KEY);
+    s.defaultWriteObject();     // Write just val1 & val2
+    final long[] keys = _chm._keys;
+    for( int i=0; i<keys.length; i++ ) {
+      final long K = keys[i];
+      if( K != NO_KEY && K != CHECK_NEW_TABLE_LONG ) { // Only serialize keys in this table
+        final Object V = get(K); // But do an official 'get' in case key is being copied
+        if( V != null ) {     // Key might have been deleted
+          s.writeLong  (K);   // Write the <long,TypeV> pair
+          s.writeObject(V);
+        }
+      }
+    }
+    s.writeLong(NO_KEY);      // Sentinel to indicate end-of-data
     s.writeObject(null);
   }
-
-  // --- readObject ----------------------------------------------------------
+  
+  // --- readObject --------------------------------------------------------
+  // Read a CHM from a stream
   private void readObject(java.io.ObjectInputStream s) throws IOException, ClassNotFoundException  {
-    s.defaultReadObject();
-    _val_1 = (TypeV) s.readObject();
-    _val_2 = (TypeV) s.readObject();
-    // Read the keys and values, and put the mappings in the table
-    while( true ) {
-      long  key =         s.readLong  ();
-      TypeV val = (TypeV) s.readObject();
-      if (key == NO_KEY)  break;
-      put(key, val);
+    s.defaultReadObject();      // Read val1 & val2
+    _chm = new CHM(this,MIN_SIZE_LOG);
+    _size = new ConcurrentAutoTable();
+    for (;;) {
+      final long key = s.readLong();
+      final TypeV V = (TypeV) s.readObject();
+      if( key == NO_KEY ) break;
+      put(key,V);               // Insert with an offical put
     }
   }
-}   // End NonBlockingHashMapLong class
+  
+}  // End NonBlockingHashMapLong class

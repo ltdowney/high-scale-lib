@@ -1,3 +1,5 @@
+
+import org.junit.Assert.*;
 import org.cliffc.high_scale_lib.*;
 import java.util.*;
 
@@ -34,7 +36,7 @@ public class NBHM_Tester2 {
     if( !P ) throw new Error(s);
   }
   
-  public void testRemoveIteration() {
+  @Test public void testRemoveIteration() {
     NonBlockingHashMap<String, String> nbhm = new NonBlockingHashMap<String, String>();
     
     // Drop things into the map
