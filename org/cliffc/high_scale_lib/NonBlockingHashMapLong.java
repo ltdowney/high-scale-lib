@@ -849,26 +849,21 @@ public class NonBlockingHashMapLong<TypeV>
   }
 
   // --- entrySet ------------------------------------------------------------
-  // --- WriteThroughEntry
-  // The entries returned by entrySet are instances of WriteThroughEntry;
-  // setting into the Map.Entry merely puts a 'put' on the underlying map.
-  // Shamelessly copied from Doug Lea's CHM code.
-  final class WriteThroughEntry	extends NonBlockingHashMap.SimpleEntry<Long,TypeV>  {
-    WriteThroughEntry(Long k, TypeV v) { super(k,v); }
-    public TypeV setValue(TypeV value) {
-      if (value == null) throw new NullPointerException();
-      TypeV v = super.setValue(value);
-      NonBlockingHashMapLong.this.put(getKey(), value);
-      return v;
-    }
-  }
   // Warning: Each call to 'next' in this iterator constructs a new Long and a
   // new WriteThroughEntry.
+  class NBHMLEntry extends AbstractEntry<Long,TypeV> {
+    NBHMLEntry( final Long k, final TypeV v ) { super(k,v); }
+    public TypeV setValue(TypeV val) {
+      if (val == null) throw new NullPointerException();
+      _val = val;
+      return put(_key, val);
+    }
+  }
   class SnapshotE implements Iterator<Map.Entry<Long,TypeV>> {
     final SnapshotV _ss;
     public SnapshotE(CHM chm) { _ss = new SnapshotV(chm); }
     public void remove() { _ss.remove(); }
-    public Map.Entry<Long,TypeV> next() { _ss.next(); return new WriteThroughEntry(_ss._prevK,_ss._prevV); }
+    public Map.Entry<Long,TypeV> next() { _ss.next(); return new NBHMLEntry(_ss._prevK,_ss._prevV); }
     public boolean hasNext() { return _ss.hasNext(); }
   }
   public Set<Map.Entry<Long,TypeV>> entrySet() {

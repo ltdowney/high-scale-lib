@@ -873,25 +873,20 @@ public class NonBlockingHashMap<TypeK, TypeV>
   }
 
   // --- entrySet ------------------------------------------------------------
-  // --- WriteThroughEntry
-  // The entries returned by entrySet are instances of WriteThroughEntry;
-  // setting into the Map.Entry merely puts a 'put' on the underlying map.
-  // Shamelessly copied from Doug Lea's CHM code.
-  final class WriteThroughEntry	extends SimpleEntry<TypeK,TypeV>  {
-    WriteThroughEntry(TypeK k, TypeV v) { super(k,v); }
-    public TypeV setValue(TypeV value) {
-      if (value == null) throw new NullPointerException();
-      TypeV v = super.setValue(value);
-      NonBlockingHashMap.this.put(getKey(), value);
-      return v;
+  // Warning: Each call to 'next' in this iterator constructs a new WriteThroughEntry.
+  class NBHMEntry extends AbstractEntry<TypeK,TypeV> {
+    NBHMEntry( final TypeK k, final TypeV v ) { super(k,v); }
+    public TypeV setValue(TypeV val) {
+      if (val == null) throw new NullPointerException();
+      _val = val;
+      return put(_key, val);
     }
   }
-  // Warning: Each call to 'next' in this iterator constructs a new WriteThroughEntry.
   class SnapshotE implements Iterator<Map.Entry<TypeK,TypeV>> {
     final SnapshotV _ss;
     public SnapshotE(Object[] kvs) { _ss = new SnapshotV(kvs); }
     public void remove() { _ss.remove(); }
-    public Map.Entry<TypeK,TypeV> next() { _ss.next(); return new WriteThroughEntry((TypeK)_ss._prevK,_ss._prevV); }
+    public Map.Entry<TypeK,TypeV> next() { _ss.next(); return new NBHMEntry((TypeK)_ss._prevK,_ss._prevV); }
     public boolean hasNext() { return _ss.hasNext(); }
   }
   public Set<Map.Entry<TypeK,TypeV>> entrySet() {
@@ -944,60 +939,6 @@ public class NonBlockingHashMap<TypeK, TypeV>
       final TypeV V = (TypeV) s.readObject();
       if( K == null ) break;
       put(K,V);                 // Insert with an offical put
-    }
-  }
-
-  // Shamelessly copied from the JDK1.5 libraries.
-  /**
-   * This should be made public as soon as possible.  It greatly simplifies
-   * the task of implementing Map.
-   */
-  static class SimpleEntry<TypeK,TypeV> implements Entry<TypeK,TypeV> {
-    TypeK key;
-    TypeV value;
-    
-    public SimpleEntry(TypeK key, TypeV value) {
-      this.key   = key;
-      this.value = value;
-    }
-    
-    public SimpleEntry(Entry<TypeK,TypeV> e) {
-      this.key   = e.getKey();
-      this.value = e.getValue();
-    }
-    
-    public TypeK getKey() {
-      return key;
-    }
-    
-    public TypeV getValue() {
-      return value;
-    }
-    
-    public TypeV setValue(TypeV value) {
-      TypeV oldValue = this.value;
-      this.value = value;
-      return oldValue;
-    }
-    
-    public boolean equals(Object o) {
-      if (!(o instanceof Map.Entry))
-        return false;
-      Map.Entry e = (Map.Entry)o;
-      return eq(key, e.getKey()) && eq(value, e.getValue());
-    }
-    
-    public int hashCode() {
-      return ((key   == null)   ? 0 :   key.hashCode()) ^
-        ((value == null)   ? 0 : value.hashCode());
-    }
-    
-    public String toString() {
-      return key + "=" + value;
-    }
-    
-    private static boolean eq(Object o1, Object o2) {
-      return (o1 == null ? o2 == null : o1.equals(o2));
     }
   }
 
