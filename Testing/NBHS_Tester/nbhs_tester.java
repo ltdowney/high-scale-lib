@@ -37,8 +37,8 @@ public class nbhs_tester extends Thread {
     }
     System.out.println();
 
-    for (Iterator i = nbhs.iterator(); i.hasNext(); ) {
-      String s = (String)i.next();
+    for (Iterator<String> i = nbhs.iterator(); i.hasNext(); ) {
+      String s = i.next();
       i.remove();
       System.out.print(s);
     }

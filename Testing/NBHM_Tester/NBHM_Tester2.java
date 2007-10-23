@@ -85,6 +85,21 @@ public class NBHM_Tester2 {
     } catch(ClassNotFoundException ex) {
       ex.printStackTrace();
     }
+
+    String str1 = "";
+    for( Iterator<Map.Entry<String,String>> i = nbhm.entrySet().iterator(); i.hasNext(); ) {
+      Map.Entry<String,String> e = i.next();
+      str1 += e.getKey();
+    }
+    assertEquals("k1k2",str1);
+
+    String str2 = "";
+    for( Iterator<String> i = nbhm.keySet().iterator(); i.hasNext(); ) {
+      String key = i.next();
+      str2 += key;
+    }
+    assertEquals("k1k2",str2);
+
   
     // Now begin removing keys and testing
     nbhm.remove(key2);

@@ -4,10 +4,11 @@ import java.io.*;
 
 public class NBHML_Tester2 {
   public static void main(String args[]) {
-    new NBHML_Tester2().testRemoveIteration();
+    testRemoveIteration();
+    testNBHML();
   }
 
-  private boolean checkViewSizes(int expectedSize, NonBlockingHashMapLong nbhml) {
+  private static boolean checkViewSizes(int expectedSize, NonBlockingHashMapLong nbhml) {
     boolean result = true;
     Collection v = nbhml.values();
     result &= v.size() == expectedSize;
@@ -18,7 +19,7 @@ public class NBHML_Tester2 {
     return result;
   }
 
-  private int getIterationSize(Iterator it) {
+  private static int getIterationSize(Iterator it) {
     int result = 0;
     while (it.hasNext()) {
       result++;
@@ -27,18 +28,18 @@ public class NBHML_Tester2 {
     return result;
   }
   
-  private void assertNBHMLCheck(NonBlockingHashMapLong nbhml) { nbhml.check(); }
-  private void assertEquals( int x, int y ) {
+  private static void assertNBHMLCheck(NonBlockingHashMapLong nbhml) { nbhml.check(); }
+  private static void assertEquals( int x, int y ) {
     if( x != y ) throw new Error(""+x+" != "+y);
   }
-  private void assertEquals( String x, String y ) {
+  private static void assertEquals( String x, String y ) {
     if( !x.equals(y) ) throw new Error(""+x+" != "+y);
   }
-  private void assertTrue( String s, boolean P ) {
+  private static void assertTrue( String s, boolean P ) {
     if( !P ) throw new Error(s);
   }
   
-  public void testRemoveIteration() {
+  public static void testRemoveIteration() {
     NonBlockingHashMapLong<String> nbhml = new NonBlockingHashMapLong<String>();
     
     // Drop things into the map
@@ -60,7 +61,7 @@ public class NBHML_Tester2 {
     assertEquals(2, getIterationSize(nbhml.keySet().iterator()));
     assertEquals(2, getIterationSize(nbhml.entrySet().iterator()));
 
-    assertEquals(nbhml.toString(),"{99=v2, 0=null}");
+    assertEquals(nbhml.toString(),"{0=v1, 99=v2}");
 
     // Serialize it out
     try {
@@ -105,5 +106,27 @@ public class NBHML_Tester2 {
     assertEquals(0, getIterationSize(nbhml.keySet().iterator()));
     assertEquals(0, getIterationSize(nbhml.entrySet().iterator()));
     
+  }
+
+  public static final void testNBHML() {
+    NonBlockingHashMapLong<String> items = new NonBlockingHashMapLong<String>();
+    for (int i=100; i<105; i++) {
+      items.put(Long.valueOf(i), String.valueOf(i));
+    }
+    
+    System.out.println("Keys:");
+    for (Long id : items.keySet()) {
+      System.out.println("\t" + id);
+    }
+    
+    System.out.println("Values:");
+    for (String value : items.values()) {
+      System.out.println("\t" + value);
+    }
+    
+    System.out.println("Entries:");
+    for (Map.Entry<Long, String> entry : items.entrySet()) {
+      System.out.println("\t" + entry.getKey() + "=" + entry.getValue());
+    }
   }
 }

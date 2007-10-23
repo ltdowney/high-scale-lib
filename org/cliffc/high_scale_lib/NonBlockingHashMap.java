@@ -822,10 +822,9 @@ public class NonBlockingHashMap<TypeK, TypeV>
       // some other thread deleted the last value.  Instead, 'next'
       // spends all its effort finding the key that comes after the
       // 'next' key.
-      TypeV currV = _nextV;
-      if( _idx != 0 && currV == null ) throw new NoSuchElementException();
+      if( _idx != 0 && _nextV == null ) throw new NoSuchElementException();
       _prevK = _nextK;          // This will become the previous key
-      _prevV =  currV;          // This will become the previous value
+      _prevV = _nextV;          // This will become the previous value
       _nextV = null;            // We have no more next-key
       // Attempt to set <_nextK,_nextV> to the next K,V pair.
       // _nextV is the trigger: stop searching when it is != null
@@ -836,7 +835,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
             (_nextV=get(_nextK)) != null )
           break;                // Got it!  _nextK is a valid Key
       }                         // Else keep scanning
-      return currV;             // Return current value.
+      return _prevV;            // Return current value.
     }
     public void remove() { 
       if( _prevV == null ) throw new IllegalStateException();
@@ -860,7 +859,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
     final SnapshotV _ss;
     public SnapshotK(Object[] kvs) { _ss = new SnapshotV(kvs); }
     public void remove() { _ss.remove(); }
-    public TypeK next() { _ss.next(); return (TypeK)_ss._nextK; }
+    public TypeK next() { _ss.next(); return (TypeK)_ss._prevK; }
     public boolean hasNext() { return _ss.hasNext(); }
   }
   public Set<TypeK> keySet() {
@@ -869,7 +868,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
       public int     size    (          ) { return NonBlockingHashMap.this.size    ( ); }
       public boolean contains( Object k ) { return NonBlockingHashMap.this.containsKey(k); }
       public boolean remove  ( Object k ) { return NonBlockingHashMap.this.remove  (k) != null; }
-      public Iterator<TypeK> iterator()    { return new SnapshotK(_kvs); }
+      public Iterator<TypeK> iterator()   { return new SnapshotK(_kvs); }
     };
   }
 
@@ -878,7 +877,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
   // The entries returned by entrySet are instances of WriteThroughEntry;
   // setting into the Map.Entry merely puts a 'put' on the underlying map.
   // Shamelessly copied from Doug Lea's CHM code.
-  final class WriteThroughEntry	extends AbstractMap.SimpleEntry<TypeK,TypeV>  {
+  final class WriteThroughEntry	extends SimpleEntry<TypeK,TypeV>  {
     WriteThroughEntry(TypeK k, TypeV v) { super(k,v); }
     public TypeV setValue(TypeV value) {
       if (value == null) throw new NullPointerException();
@@ -947,4 +946,59 @@ public class NonBlockingHashMap<TypeK, TypeV>
       put(K,V);                 // Insert with an offical put
     }
   }
+
+  // Shamelessly copied from the JDK1.5 libraries.
+  /**
+   * This should be made public as soon as possible.  It greatly simplifies
+   * the task of implementing Map.
+   */
+  static class SimpleEntry<TypeK,TypeV> implements Entry<TypeK,TypeV> {
+    TypeK key;
+    TypeV value;
+    
+    public SimpleEntry(TypeK key, TypeV value) {
+      this.key   = key;
+      this.value = value;
+    }
+    
+    public SimpleEntry(Entry<TypeK,TypeV> e) {
+      this.key   = e.getKey();
+      this.value = e.getValue();
+    }
+    
+    public TypeK getKey() {
+      return key;
+    }
+    
+    public TypeV getValue() {
+      return value;
+    }
+    
+    public TypeV setValue(TypeV value) {
+      TypeV oldValue = this.value;
+      this.value = value;
+      return oldValue;
+    }
+    
+    public boolean equals(Object o) {
+      if (!(o instanceof Map.Entry))
+        return false;
+      Map.Entry e = (Map.Entry)o;
+      return eq(key, e.getKey()) && eq(value, e.getValue());
+    }
+    
+    public int hashCode() {
+      return ((key   == null)   ? 0 :   key.hashCode()) ^
+        ((value == null)   ? 0 : value.hashCode());
+    }
+    
+    public String toString() {
+      return key + "=" + value;
+    }
+    
+    private static boolean eq(Object o1, Object o2) {
+      return (o1 == null ? o2 == null : o1.equals(o2));
+    }
+  }
+
 } // End NonBlockingHashMap class

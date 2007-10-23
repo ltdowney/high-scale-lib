@@ -788,10 +788,9 @@ public class NonBlockingHashMapLong<TypeV>
       // some other thread deleted the last value.  Instead, 'next'
       // spends all its effort finding the key that comes after the
       // 'next' key.
-      TypeV currV = _nextV;
-      if( _idx != -2 && currV == null ) throw new NoSuchElementException();
+      if( _idx != -2 && _nextV == null ) throw new NoSuchElementException();
       _prevK = _nextK;          // This will become the previous key
-      _prevV =  currV;          // This will become the previous value
+      _prevV = _nextV;          // This will become the previous value
       _nextV = null;            // We have no more next-key
       // Attempt to set <_nextK,_nextV> to the next K,V pair.
       // _nextV is the trigger: stop searching when it is != null
@@ -812,7 +811,7 @@ public class NonBlockingHashMapLong<TypeV>
             (_nextV=get(_nextK)) != null )
           break;                // Got it!  _nextK is a valid Key
       }                         // Else keep scanning
-      return currV;             // Return current value.
+      return _prevV;            // Return current value.
     }
     public void remove() { 
       if( _prevV == null ) throw new IllegalStateException();
@@ -836,7 +835,7 @@ public class NonBlockingHashMapLong<TypeV>
     final SnapshotV _ss;
     public SnapshotK(CHM chm) { _ss = new SnapshotV(chm); }
     public void remove() { _ss.remove(); }
-    public Long next() { _ss.next(); return _ss._nextK; }
+    public Long next() { _ss.next(); return _ss._prevK; }
     public boolean hasNext() { return _ss.hasNext(); }
   }
   public Set<Long> keySet() {
@@ -854,7 +853,7 @@ public class NonBlockingHashMapLong<TypeV>
   // The entries returned by entrySet are instances of WriteThroughEntry;
   // setting into the Map.Entry merely puts a 'put' on the underlying map.
   // Shamelessly copied from Doug Lea's CHM code.
-  final class WriteThroughEntry	extends AbstractMap.SimpleEntry<Long,TypeV>  {
+  final class WriteThroughEntry	extends NonBlockingHashMap.SimpleEntry<Long,TypeV>  {
     WriteThroughEntry(Long k, TypeV v) { super(k,v); }
     public TypeV setValue(TypeV value) {
       if (value == null) throw new NullPointerException();
@@ -869,7 +868,7 @@ public class NonBlockingHashMapLong<TypeV>
     final SnapshotV _ss;
     public SnapshotE(CHM chm) { _ss = new SnapshotV(chm); }
     public void remove() { _ss.remove(); }
-    public Map.Entry<Long,TypeV> next() { _ss.next(); return new WriteThroughEntry(_ss._nextK,_ss._nextV); }
+    public Map.Entry<Long,TypeV> next() { _ss.next(); return new WriteThroughEntry(_ss._prevK,_ss._prevV); }
     public boolean hasNext() { return _ss.hasNext(); }
   }
   public Set<Map.Entry<Long,TypeV>> entrySet() {
