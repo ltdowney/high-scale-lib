@@ -893,16 +893,16 @@ public class NonBlockingHashMap<TypeK, TypeV>
     return new AbstractSet<Map.Entry<TypeK,TypeV>>() {
       public void    clear   (          ) {        NonBlockingHashMap.this.clear( ); }
       public int     size    (          ) { return NonBlockingHashMap.this.size ( ); }
-      public boolean remove( Object o ) {
+      public boolean remove( final Object o ) {
         if (!(o instanceof Map.Entry)) return false;
         Map.Entry<?,?> e = (Map.Entry<?,?>)o;
         return NonBlockingHashMap.this.remove(e.getKey(), e.getValue());
       }
-      public boolean contains(Object o) {
+      public boolean contains(final Object o) {
         if (!(o instanceof Map.Entry)) return false;
         Map.Entry<?,?> e = (Map.Entry<?,?>)o;
-        TypeV v = NonBlockingHashMap.this.get(e.getKey());
-        return v != null && v.equals(e.getValue());
+        TypeV v = get(e.getKey());
+        return v.equals(e.getValue());
       }
       public Iterator<Map.Entry<TypeK,TypeV>> iterator() { return new SnapshotE(_kvs); }
     };

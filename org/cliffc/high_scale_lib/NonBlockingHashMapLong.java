@@ -777,7 +777,7 @@ public class NonBlockingHashMapLong<TypeV>
     final CHM _chm;
     public SnapshotV(CHM chm) { _chm = chm; _idx = -2; next(); }
     int length() { return _chm._keys.length; }
-    long key(int idx) { return _chm._keys[idx]; }
+    long key(final int idx) { return _chm._keys[idx]; }
     private int _idx;           // -2 for NO_KEY, -1 for CHECK_NEW_TABLE_LONG, 0-keys.length
     private long  _nextK, _prevK; // Last 2 keys found
     private TypeV _nextV, _prevV; // Last 2 values found
@@ -853,7 +853,7 @@ public class NonBlockingHashMapLong<TypeV>
   // new WriteThroughEntry.
   class NBHMLEntry extends AbstractEntry<Long,TypeV> {
     NBHMLEntry( final Long k, final TypeV v ) { super(k,v); }
-    public TypeV setValue(TypeV val) {
+    public TypeV setValue(final TypeV val) {
       if (val == null) throw new NullPointerException();
       _val = val;
       return put(_key, val);
@@ -870,16 +870,16 @@ public class NonBlockingHashMapLong<TypeV>
     return new AbstractSet<Map.Entry<Long,TypeV>>() {
       public void    clear   (          ) {        NonBlockingHashMapLong.this.clear( ); }
       public int     size    (          ) { return NonBlockingHashMapLong.this.size ( ); }
-      public boolean remove( Object o ) {
+      public boolean remove( final Object o ) {
         if (!(o instanceof Map.Entry)) return false;
-        Map.Entry<?,?> e = (Map.Entry<?,?>)o;
+        final Map.Entry<?,?> e = (Map.Entry<?,?>)o;
         return NonBlockingHashMapLong.this.remove(e.getKey(), e.getValue());
       }
-      public boolean contains(Object o) {
+      public boolean contains(final Object o) {
         if (!(o instanceof Map.Entry)) return false;
-        Map.Entry<?,?> e = (Map.Entry<?,?>)o;
-        TypeV v = NonBlockingHashMapLong.this.get(e.getKey());
-        return v != null && v.equals(e.getValue());
+        final Map.Entry<?,?> e = (Map.Entry<?,?>)o;
+        TypeV v = get(e.getKey());
+        return v.equals(e.getValue());
       }
       public Iterator<Map.Entry<Long,TypeV>> iterator() { return new SnapshotE(_chm); }
     };

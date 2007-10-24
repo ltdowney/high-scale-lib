@@ -1,72 +1,104 @@
+/*
+ * Written by Cliff Click and released to the public domain, as explained at
+ * http://creativecommons.org/licenses/publicdomain
+ */
+
 import org.cliffc.high_scale_lib.*;
 import java.util.*;
 import java.io.*;
+import junit.framework.TestCase;
+import static org.junit.Assert.*;
+import static org.hamcrest.CoreMatchers.*;
 
-public class NBHM_Tester2 {
-  public static void main(String args[]) {
-    new NBHM_Tester2().testRemoveIteration();
+// Test NonBlockingHashMap via JUnit
+public class NBHM_Tester2 extends TestCase {
+
+  private NonBlockingHashMap<String,String> _nbhm;
+  protected void setUp   () { _nbhm = new NonBlockingHashMap<String,String>(); }
+  protected void tearDown() { _nbhm = null; }
+
+  // Test some basic stuff; add a few keys, remove a few keys
+  public void testBasic() {
+    assertTrue ( _nbhm.isEmpty() );
+    assertThat ( _nbhm.put("k1","v1"), nullValue() );
+    checkSizes (1);
+    assertThat ( _nbhm.put("k2","v2"), nullValue() );
+    checkSizes (2);
+    assertThat ( _nbhm.put("k1","v1a"), is("v1") );
+    assertThat ( _nbhm.put("k2","v2a"), is("v2") );
+    checkSizes (2);
+    assertThat ( _nbhm.remove("k1"), is("v1a") );
+    checkSizes (1);
+    assertThat ( _nbhm.remove("k1"), nullValue() );
+    assertThat ( _nbhm.remove("k2"), is("v2a") );
+    checkSizes (0);
+    assertThat ( _nbhm.remove("k2"), nullValue() );
+    assertThat ( _nbhm.remove("k3"), nullValue() );
+    assertTrue ( _nbhm.isEmpty() );
   }
 
-  private boolean checkViewSizes(int expectedSize, NonBlockingHashMap nbhm) {
-    boolean result = true;
-    Collection v = nbhm.values();
-    result &= v.size() == expectedSize;
-    Collection k = nbhm.keySet();
-    result &= k.size() == expectedSize;
-    Collection e = nbhm.entrySet();
-    result &= e.size() == expectedSize;
-    return result;
+  // Check all iterators for correct size counts
+  private void checkSizes(int expectedSize) {
+    assertEquals( "size()", _nbhm.size(), expectedSize );
+    Collection vals = _nbhm.values();
+    checkSizes("values()",vals.size(),vals.iterator(),expectedSize);
+    Set keys = _nbhm.keySet();
+    checkSizes("keySet()",keys.size(),keys.iterator(),expectedSize);
+    Set ents = _nbhm.entrySet();
+    checkSizes("entrySet()",ents.size(),ents.iterator(),expectedSize);
   }
 
-  private int getIterationSize(Iterator it) {
+  // Check that the iterator iterates the correct number of times
+  private void checkSizes(String msg, int sz, Iterator it, int expectedSize) {
+    assertEquals( msg, expectedSize, sz );
     int result = 0;
     while (it.hasNext()) {
       result++;
       it.next();
     }
-    return result;
+    assertEquals( msg, expectedSize, result );
   }
   
-  private void assertNBHMCheck(NonBlockingHashMap nbhm) { nbhm.check(); }
-  private void assertEquals( int x, int y ) {
-    if( x != y ) throw new Error(""+x+" != "+y);
-  }
-  private void assertEquals( String x, String y ) {
-    if( !x.equals(y) ) throw new Error(""+x+" != "+y);
-  }
-  private void assertTrue( String s, boolean P ) {
-    if( !P ) throw new Error(s);
-  }
-  
-  public void testRemoveIteration() {
-    NonBlockingHashMap<String,String> nbhm = new NonBlockingHashMap<String,String>();
-    
-    // Drop things into the map
-    String key1 = "k1";
-    nbhm.put(key1, "v1");
-    assertNBHMCheck(nbhm);
-    assertEquals(1, nbhm.size());
-    assertTrue("view sizes should be 1 after add", checkViewSizes(1, nbhm));
-    assertEquals(1, getIterationSize(nbhm.values().iterator()));
-    assertEquals(1, getIterationSize(nbhm.keySet().iterator()));
-    assertEquals(1, getIterationSize(nbhm.entrySet().iterator()));
-    
-    String key2 = "k2";
-    nbhm.put(key2, "v2");
-    assertNBHMCheck(nbhm);
-    assertEquals(2, nbhm.size());
-    assertTrue("view sizes should be 2 after add", checkViewSizes(2, nbhm));
-    assertEquals(2, getIterationSize(nbhm.values().iterator()));
-    assertEquals(2, getIterationSize(nbhm.keySet().iterator()));
-    assertEquals(2, getIterationSize(nbhm.entrySet().iterator()));
 
-    assertEquals(nbhm.toString(),"{k1=v1, k2=v2}");
+  public void testIteration() {
+    assertTrue ( _nbhm.isEmpty() );
+    assertThat ( _nbhm.put("k1","v1"), nullValue() );
+    assertThat ( _nbhm.put("k2","v2"), nullValue() );
+
+    String str1 = "";
+    for( Iterator<Map.Entry<String,String>> i = _nbhm.entrySet().iterator(); i.hasNext(); ) {
+      Map.Entry<String,String> e = i.next();
+      str1 += e.getKey();
+    }
+    assertThat("found all entries",str1,anyOf(is("k1k2"),is("k2k1")));
+
+    String str2 = "";
+    for( Iterator<String> i = _nbhm.keySet().iterator(); i.hasNext(); ) {
+      String key = i.next();
+      str2 += key;
+    }
+    assertThat("found all keys",str2,anyOf(is("k1k2"),is("k2k1")));
+
+    String str3 = "";
+    for( Iterator<String> i = _nbhm.values().iterator(); i.hasNext(); ) {
+      String val = i.next();
+      str3 += val;
+    }
+    assertThat("found all vals",str3,anyOf(is("v1v2"),is("v2v1")));
+
+    assertThat("toString works",_nbhm.toString(), anyOf(is("{k1=v1, k2=v2}"),is("{k2=v2, k1=v1}")));
+  }
+
+  public void testSerial() {
+    assertTrue ( _nbhm.isEmpty() );
+    assertThat ( _nbhm.put("k1","v1"), nullValue() );
+    assertThat ( _nbhm.put("k2","v2"), nullValue() );
 
     // Serialize it out
     try {
       FileOutputStream fos = new FileOutputStream("NBHM_test.txt");
       ObjectOutputStream out = new ObjectOutputStream(fos);
-      out.writeObject(nbhm);
+      out.writeObject(_nbhm);
       out.close();
     } catch(IOException ex) {
       ex.printStackTrace();
@@ -76,49 +108,14 @@ public class NBHM_Tester2 {
     try {
       FileInputStream fis = new FileInputStream("NBHM_test.txt");
       ObjectInputStream in = new ObjectInputStream(fis);
-      NonBlockingHashMap nbhm2 = (NonBlockingHashMap)in.readObject();
+      NonBlockingHashMap nbhm = (NonBlockingHashMap)in.readObject();
       in.close();
-      assertEquals(nbhm.toString(),nbhm2.toString());
-      nbhm = nbhm2;           // Use the de-serialized version
+      assertEquals(_nbhm.toString(),nbhm.toString());
     } catch(IOException ex) {
       ex.printStackTrace();
     } catch(ClassNotFoundException ex) {
       ex.printStackTrace();
     }
 
-    String str1 = "";
-    for( Iterator<Map.Entry<String,String>> i = nbhm.entrySet().iterator(); i.hasNext(); ) {
-      Map.Entry<String,String> e = i.next();
-      str1 += e.getKey();
-    }
-    assertEquals("k1k2",str1);
-
-    String str2 = "";
-    for( Iterator<String> i = nbhm.keySet().iterator(); i.hasNext(); ) {
-      String key = i.next();
-      str2 += key;
-    }
-    assertEquals("k1k2",str2);
-
-  
-    // Now begin removing keys and testing
-    nbhm.remove(key2);
-
-    assertNBHMCheck(nbhm);
-    assertEquals(1, nbhm.size());
-    assertTrue("view sizes should be 1 after remove again", checkViewSizes(1, nbhm));
-    assertEquals(1, getIterationSize(nbhm.values().iterator()));
-    assertEquals(1, getIterationSize(nbhm.keySet().iterator()));
-    assertEquals(1, getIterationSize(nbhm.entrySet().iterator()));
-    
-    nbhm.clear();
-
-    assertNBHMCheck(nbhm);
-    assertEquals(0, nbhm.size());
-    assertTrue("view sizes should be 0 after clear again", checkViewSizes(0, nbhm));
-    assertEquals(0, getIterationSize(nbhm.values().iterator()));
-    assertEquals(0, getIterationSize(nbhm.keySet().iterator()));
-    assertEquals(0, getIterationSize(nbhm.entrySet().iterator()));
-    
   }
 }

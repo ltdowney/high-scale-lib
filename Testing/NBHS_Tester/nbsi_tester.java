@@ -2,57 +2,125 @@
  * Written by Cliff Click and released to the public domain, as explained at
  * http://creativecommons.org/licenses/publicdomain
  */
+
 import org.cliffc.high_scale_lib.*;
 import java.util.*;
+import java.io.*;
+import junit.framework.TestCase;
+import static org.junit.Assert.*;
+import static org.hamcrest.CoreMatchers.*;
 
-public class nbsi_tester extends Thread {
+// Test NonBlockingSetInt via JUnit
+public class nbsi_tester extends TestCase {
 
-  public static void main( String args[] ) throws Exception {
-    NonBlockingSetInt nbsi = new NonBlockingSetInt(100);
-    print(nbsi);
+  private NonBlockingSetInt _nbsi;
+  protected void setUp   () { _nbsi = new NonBlockingSetInt(100); }
+  protected void tearDown() { _nbsi = null; }
 
-    if( nbsi.add(3) != true )
-      throw new Exception("adding 3 but 3 should not exist");
-    if( nbsi.add(4) != true )
-      throw new Exception("adding 4 but 4 should not exist");
-    print(nbsi);
-
-    for( int i=0; i<100; i++ )
-      if( nbsi.add(i) != (i != 3 && i != 4) )
-        throw new Exception("adding "+i+" but it should not exist");
-    print(nbsi);
-
-    nbsi.remove(0);
-    if( nbsi.size() != 100-1 )
-      throw new Exception("size off after remove");
-
-    // simple iterator test
-    for( Object s : nbsi ) {
-      System.out.print(s);
-    }
-    System.out.println();
-
-    for (Iterator<Integer> i = nbsi.iterator(); i.hasNext(); ) {
-      int s = i.next();         // auto-box/unbox!
-      i.remove();
-      System.out.print(s);
-    }
-    System.out.println();
-    print(nbsi);
-
-    nbsi.clear();
-    print(nbsi);
+  // Test some basic stuff; add a few keys, remove a few keys
+  public void testBasic() {
+    assertTrue ( _nbsi.isEmpty() );
+    assertTrue ( _nbsi.add(1) );
+    checkSizes (1);
+    assertTrue ( _nbsi.add(2) );
+    checkSizes (2);
+    assertFalse( _nbsi.add(1) );
+    assertFalse( _nbsi.add(2) );
+    checkSizes (2);
+    assertThat ( _nbsi.remove(1), is(true ) );
+    checkSizes (1);
+    assertThat ( _nbsi.remove(1), is(false) );
+    assertTrue ( _nbsi.remove(2) );
+    checkSizes (0);
+    assertFalse( _nbsi.remove(2) );
+    assertFalse( _nbsi.remove(3) );
+    assertTrue ( _nbsi.isEmpty() );
   }
 
-  static void print(NonBlockingSetInt nbsi) throws Exception {
-    int size = nbsi.size();
-    System.out.print("set["+size+"]=");
-    if( (size==0) != nbsi.isEmpty() )
-      throw new Exception("size="+size+", isEmpty="+nbsi.isEmpty());
-    System.out.println(nbsi);
-    //for( int i=0; i<100; i++ )
-    //  if( nbsi.contains(i) )
-    //    System.out.print(""+i+",");
-    //System.out.println("}");
+  // Check all iterators for correct size counts
+  private void checkSizes(int expectedSize) {
+    assertEquals( "size()", _nbsi.size(), expectedSize );
+    Iterator it = _nbsi.iterator();
+    int result = 0;
+    while (it.hasNext()) {
+      result++;
+      it.next();
+    }
+    assertEquals( "iterator missed", expectedSize, result );
+  }
+
+
+  public void testIteration() {
+    assertTrue ( _nbsi.isEmpty() );
+    assertTrue ( _nbsi.add(1) );
+    assertTrue ( _nbsi.add(2) );
+
+    String str1 = "";
+    for( Iterator<Integer> i = _nbsi.iterator(); i.hasNext(); ) {
+      Integer val = i.next();
+      str1 += val;
+    }
+    assertThat("found all vals",str1,anyOf(is("12"),is("21")));
+
+    assertThat("toString works",_nbsi.toString(), anyOf(is("[1, 2]"),is("[2, 1]")));
+  }
+
+  public void testIterationBig() {
+    for( int i=0; i<100; i++ )
+      _nbsi.add(i);
+    assertThat( _nbsi.size(), is(100) );
+
+    int sz =0;
+    int sum = 0;
+    for( Integer x : _nbsi ) {
+      sz++;
+      sum += x;
+      assertTrue(x>=0 && x<=99);
+    }
+    assertThat("Found 100 ints",sz,is(100));
+    assertThat("Found all integers in list",sum,is(100*99/2));
+
+    assertThat( "can remove 3", _nbsi.remove(3), is(true) );
+    assertThat( "can remove 4", _nbsi.remove(4), is(true) );
+    sz =0;
+    sum = 0;
+    for( Integer x : _nbsi ) {
+      sz++;
+      sum += x;
+      assertTrue(x>=0 && x<=99);
+    }
+    assertThat("Found 98 ints",sz,is(98));
+    assertThat("Found all integers in list",sum,is(100*99/2 - (3+4)));
+
+  }
+
+  public void testSerial() {
+    assertTrue ( _nbsi.isEmpty() );
+    assertTrue ( _nbsi.add(1) );
+    assertTrue ( _nbsi.add(2) );
+
+    // Serialize it out
+    try {
+      FileOutputStream fos = new FileOutputStream("NBSI_test.txt");
+      ObjectOutputStream out = new ObjectOutputStream(fos);
+      out.writeObject(_nbsi);
+      out.close();
+    } catch(IOException ex) {
+      ex.printStackTrace();
+    }
+
+    // Read it back
+    try {
+      FileInputStream fis = new FileInputStream("NBSI_test.txt");
+      ObjectInputStream in = new ObjectInputStream(fis);
+      NonBlockingSetInt nbsi = (NonBlockingSetInt)in.readObject();
+      in.close();
+      assertEquals(_nbsi.toString(),nbsi.toString());
+    } catch(IOException ex) {
+      ex.printStackTrace();
+    } catch(ClassNotFoundException ex) {
+      ex.printStackTrace();
+    }
+
   }
 }

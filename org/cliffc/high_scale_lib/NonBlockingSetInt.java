@@ -5,6 +5,7 @@
 
 package org.cliffc.high_scale_lib;
 import java.util.*;
+import java.io.Serializable;
 
 // A Non-Blocking Set of primitive 'int'.
 // Requires: maximum element on construction
@@ -20,7 +21,7 @@ import java.util.*;
 
 // The implementation is a simple bit-vector using CAS for update.
 
-public class NonBlockingSetInt extends AbstractSet {
+public class NonBlockingSetInt extends AbstractSet<Integer> implements Serializable {
 
   // Used to count elements
   private transient final ConcurrentAutoTable _size;

@@ -5,13 +5,14 @@
 
 package org.cliffc.high_scale_lib;
 import java.util.*;
+import java.io.Serializable;
 
 // A simple wrapper around NonBlockingHashMap making it a Set.  After calling
 // the 'atomic_immutable' call the existing Set is made immutable (and it's
 // internal format can change to better compress the data).
 
-public class NonBlockingHashSet<E> extends AbstractSet<E> {
-  static final Object V = new Object();
+public class NonBlockingHashSet<E> extends AbstractSet<E> implements Serializable {
+  static final Object V = "";
 
   private final NonBlockingHashMap<E,Object> _map;
 
@@ -19,7 +20,7 @@ public class NonBlockingHashSet<E> extends AbstractSet<E> {
 
   public boolean add        ( final E          o ) { return _map.putIfAbsent(o,V) != V; }
   public boolean contains   ( final Object     o ) { return _map.containsKey(o); }
-  public boolean remove     ( final Object     o ) { return _map.remove(o) == o; }
+  public boolean remove     ( final Object     o ) { return _map.remove(o) == V; }
   public int     size       (                    ) { return _map.size(); }
   public void    clear      (                    ) { _map.clear(); }
 
