@@ -20,8 +20,23 @@ import java.io.Serializable;
 // implementations).  Space is approximately (largest_element/8 + 64bytes).
 
 // The implementation is a simple bit-vector using CAS for update.
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.*;
+import sun.misc.Unsafe;
 
 public class NonBlockingSetInt extends AbstractSet<Integer> implements Serializable {
+
+  // --- Bits to allow Unsafe access to arrays
+  private static final Unsafe _unsafe = UtilUnsafe.getUnsafe();
+  private static final int _Lbase  = _unsafe.arrayBaseOffset(long[].class);
+  private static final int _Lscale = _unsafe.arrayIndexScale(long[].class);
+  private static long rawIndex(final long[] ary, final int idx) {
+    assert idx >= 0 && idx < ary.length;
+    return _Lbase + idx * _Lscale;
+  }
+  private final boolean CAS( int idx, long old, long nnn ) {
+    return _unsafe.compareAndSwapLong( _bits, rawIndex(_bits, idx), old, nnn );
+  }
 
   // Used to count elements
   private transient final ConcurrentAutoTable _size;
@@ -40,15 +55,23 @@ public class NonBlockingSetInt extends AbstractSet<Integer> implements Serializa
   }
 
   // Lower-case 'int' versions - no autoboxing, very fast
-  public boolean add     ( final int i ) { // Non-atomic version
-    if( (_bits[i>>6] & mask(i)) != 0 ) return false;
-    _bits[i>>6] |= mask(i);     // Non-atomic
+  public boolean add ( final int i ) {
+    long mask = mask(i);
+    long old;
+    do { 
+      old = _bits[i>>6]; // Read old bits
+      if( (old & mask) != 0 ) return false; // Bit is already set?
+    } while( !CAS( i>>6, old, old | mask ) );
     _size.add(1);
     return true;
   }
   public boolean remove  ( final int i ) {
-    if( (_bits[i>>6] & mask(i)) == 0 ) return false;
-    _bits[i>>6] &= ~mask(i);    // Non-atomic
+    long mask = mask(i);
+    long old;
+    do { 
+      old = _bits[i>>6]; // Read old bits
+      if( (old & mask) == 0 ) return false; // Bit is already clear?
+    } while( !CAS( i>>6, old, old & ~mask ) );
     _size.add(-1);
     return true;
   }
@@ -65,9 +88,14 @@ public class NonBlockingSetInt extends AbstractSet<Integer> implements Serializa
     return o instanceof Integer ? remove  (((Integer)o).intValue()) : false; }
   public int     size    (                 ) { return (int)_size.sum(); }
   public void    clear   (                 ) { 
-    for( int i=0; i<_bits.length; i++ )
-      _bits[i] = 0;             // Non-atomic version
-    _size.add(-_size.sum());    // Very very non-atomic
+    for( int i=0; i<_bits.length; i++ ) {
+      long old = _bits[i>>6];
+      if( old != 0L ) {
+        while( !CAS( i>>6, old, 0L ) )
+          old = _bits[i>>6];
+        _size.add(-Long.bitCount(old));
+      }
+    }
   }
 
   public Iterator<Integer> iterator(       ) { return new iter(); }

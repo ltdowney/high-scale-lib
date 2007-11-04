@@ -12,6 +12,9 @@ import static org.hamcrest.CoreMatchers.*;
 
 // Test NonBlockingSetInt via JUnit
 public class nbsi_tester extends TestCase {
+  public static void main(String args[]) {
+    org.junit.runner.JUnitCore.main("nbsi_tester");
+  }
 
   private NonBlockingSetInt _nbsi;
   protected void setUp   () { _nbsi = new NonBlockingSetInt(100); }
@@ -120,6 +123,37 @@ public class nbsi_tester extends TestCase {
       ex.printStackTrace();
     } catch(ClassNotFoundException ex) {
       ex.printStackTrace();
+    }
+  }
+
+  // Do some simple concurrent testing
+  public void testConcurrentSimple() throws InterruptedException {
+    final NonBlockingSetInt nbsi = new NonBlockingSetInt(1000);
+    
+    // In 2 threads, add & remove even & odd elements concurrently
+    Thread t = new Thread() {
+        public void run() {
+          for( int j=0; j<100; j++ ) {
+            for( int i=0; i<1000; i+=2 )
+              nbsi.add(i);
+            for( int i=0; i<1000; i+=2 )
+              nbsi.remove(i);
+          }
+        }
+      };
+    t.start();
+    for( int j=0; j<100; j++ ) {
+      for( int i=1; i<1000; i+=2 )
+        nbsi.add(i);
+      for( int i=1; i<1000; i+=2 )
+        nbsi.remove(i);
+    }
+    t.join();
+
+    // In the end, all members should be removed
+    assertThat( "concurrent size=0", nbsi.size(), is(0) );
+    for( Integer x : nbsi ) {
+      assertTrue("No elements so never get here",false);
     }
 
   }
