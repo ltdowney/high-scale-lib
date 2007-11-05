@@ -909,10 +909,10 @@ public class NonBlockingHashMap<TypeK, TypeV>
   }
 
   // --- writeObject -------------------------------------------------------
-  // Write a NBMH to a stream
+  // Write a NBHM to a stream
   private void writeObject(java.io.ObjectOutputStream s) throws IOException  {
     s.defaultWriteObject();     // Nothing to write
-    s.writeBoolean( _kvs[1] != null );
+    s.writeBoolean( _kvs[1] != null ); // Memoizing hashes or not
     final Object[] kvs = _kvs;  // The One Field is transient
     for( int i=0; i<len(kvs); i++ ) {
       final Object K = key(kvs,i);
