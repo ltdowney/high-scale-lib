@@ -17,7 +17,7 @@ public class nbsi_tester extends TestCase {
   }
 
   private NonBlockingSetInt _nbsi;
-  protected void setUp   () { _nbsi = new NonBlockingSetInt(100); }
+  protected void setUp   () { _nbsi = new NonBlockingSetInt(); }
   protected void tearDown() { _nbsi = null; }
 
   // Test some basic stuff; add a few keys, remove a few keys
@@ -38,6 +38,10 @@ public class nbsi_tester extends TestCase {
     assertFalse( _nbsi.remove(2) );
     assertFalse( _nbsi.remove(3) );
     assertTrue ( _nbsi.isEmpty() );
+    assertTrue ( _nbsi.add(63) );
+    checkSizes (1);
+    assertTrue ( _nbsi.remove(63) );
+    assertFalse( _nbsi.remove(63) );
   }
 
   // Check all iterators for correct size counts
@@ -128,7 +132,7 @@ public class nbsi_tester extends TestCase {
 
   // Do some simple concurrent testing
   public void testConcurrentSimple() throws InterruptedException {
-    final NonBlockingSetInt nbsi = new NonBlockingSetInt(1000);
+    final NonBlockingSetInt nbsi = new NonBlockingSetInt();
     
     // In 2 threads, add & remove even & odd elements concurrently
     Thread t = new Thread() {
