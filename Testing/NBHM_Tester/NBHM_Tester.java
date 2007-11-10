@@ -509,9 +509,10 @@ class NBHM_Tester {
     public String toString() {
       S s_old = S.MT;
       S s_new = S.MT;
-      String str = "("+s_old+"/"+s_new;
+      StringBuffer buf = new StringBuffer();
+      buf.append("(").append(s_old).append("/").append(s_new);
       for( int i=0; i<_events.length; i++ ) {
-        str += " --";
+        buf.append(" --");
 	// Print all threads involved here
         long tids = _tids[i];
         int t=0;
@@ -519,8 +520,8 @@ class NBHM_Tester {
         while( tids != 0 ) {
           if( (tids & (1<<t)) != 0 ) {
             tids -= (1<<t);
-            if( !first ) str += ",";
-            str += Thrd._thrds[t];
+            if( !first ) buf.append(",");
+            buf.append(Thrd._thrds[t]);
             first = false;
           }
           t++;
@@ -529,19 +530,19 @@ class NBHM_Tester {
 	Event e = _events[i];
         S s = e.old_or_new() ? s_new : s_old;
         if( e.is_copyread() ) {
-          str += "--> ["+(e.old_or_new()?"new ":"old ")+s+"]";
+          buf.append("--> [").append(e.old_or_new()?"new ":"old ").append(s).append("]");
         } else {
           assert _allowed_transitions[e.tran()] == s;
           s = _allowed_transitions[e.tran()+1]; // New State
           if( e.old_or_new() ) s_new = s; else s_old = s;
           // Print the New World Order
-          str += "--> "+s_old+"/"+s_new;
+          buf.append("--> ").append(s_old).append("/").append(s_new);
         }
       }
-      str += ")";
+      buf.append(")");
       assert s_old == _old;
       assert s_new == _new;
-      return str;
+      return buf.toString();
     }
 
     // --- printAll ----------------------------------------------------------
@@ -577,7 +578,8 @@ class NBHM_Tester {
       S s_old = S.MT;
       S s_new = S.MT;
       S s_last = S.MT;
-      String str = "{";
+      StringBuffer buf = new StringBuffer();
+      buf.append("{");
       for( int i=0; i<_events.length; i++ ) {
 	Event e = _events[i];
         if( !e.is_copyread() ) {
@@ -592,13 +594,13 @@ class NBHM_Tester {
           if( s == S.Ka ) s = S.KA;
           if( s == S.Kb ) s = S.KB;
           if( s != s_last ) {
-            str += s + " ";
+            buf.append(s).append(" ");
             s_last = s;
           }
         }
       }
-      str += "}";
-      return str;
+      buf.append("}");
+      return buf.toString();
     }
 
     // --- search ------------------------------------------------------------
@@ -641,10 +643,10 @@ class NBHM_Tester {
 
 
     Thrd a0 = new Thrd_A("a0");
-    Thrd a1 = new Thrd_A("a1");
+    //Thrd a1 = new Thrd_A("a1");
     Thrd b0 = new Thrd_B("b0");
-    Thrd d0 = new Thrd_del("d0");
-    Thrd d1 = new Thrd_del("d1");
+    //Thrd d0 = new Thrd_del("d0");
+    //Thrd d1 = new Thrd_del("d1");
     Thrd c0 = new Thrd_copy("c0");
     Thrd c1 = new Thrd_copy("c1");
     Thrd[] thrds = {a0,b0,c0,c1};

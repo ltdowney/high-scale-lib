@@ -58,12 +58,12 @@ public class nbhs_tester extends TestCase {
     assertTrue ( _nbhs.add("k1") );
     assertTrue ( _nbhs.add("k2") );
 
-    String str1 = "";
+    StringBuffer buf = new StringBuffer();
     for( Iterator<String> i = _nbhs.iterator(); i.hasNext(); ) {
       String val = i.next();
-      str1 += val;
+      buf.append(val);
     }
-    assertThat("found all vals",str1,anyOf(is("k1k2"),is("k2k1")));
+    assertThat("found all vals",buf.toString(),anyOf(is("k1k2"),is("k2k1")));
 
     assertThat("toString works",_nbhs.toString(), anyOf(is("[k1, k2]"),is("[k2, k1]")));
   }

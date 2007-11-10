@@ -42,6 +42,22 @@ public class nbsi_tester extends TestCase {
     checkSizes (1);
     assertTrue ( _nbsi.remove(63) );
     assertFalse( _nbsi.remove(63) );
+
+
+    assertTrue ( _nbsi.isEmpty() );
+    assertTrue ( _nbsi.add(10000) );
+    checkSizes (1);
+    assertTrue ( _nbsi.add(20000) );
+    checkSizes (2);
+    assertFalse( _nbsi.add(10000) );
+    assertFalse( _nbsi.add(20000) );
+    checkSizes (2);
+    assertThat ( _nbsi.remove(10000), is(true ) );
+    checkSizes (1);
+    assertThat ( _nbsi.remove(10000), is(false) );
+    assertTrue ( _nbsi.remove(20000) );
+    checkSizes (0);
+    assertFalse( _nbsi.remove(20000) );
   }
 
   // Check all iterators for correct size counts
@@ -62,12 +78,12 @@ public class nbsi_tester extends TestCase {
     assertTrue ( _nbsi.add(1) );
     assertTrue ( _nbsi.add(2) );
 
-    String str1 = "";
+    StringBuffer buf = new StringBuffer();
     for( Iterator<Integer> i = _nbsi.iterator(); i.hasNext(); ) {
       Integer val = i.next();
-      str1 += val;
+      buf.append(val);
     }
-    assertThat("found all vals",str1,anyOf(is("12"),is("21")));
+    assertThat("found all vals",buf.toString(),anyOf(is("12"),is("21")));
 
     assertThat("toString works",_nbsi.toString(), anyOf(is("[1, 2]"),is("[2, 1]")));
   }
@@ -133,32 +149,41 @@ public class nbsi_tester extends TestCase {
   // Do some simple concurrent testing
   public void testConcurrentSimple() throws InterruptedException {
     final NonBlockingSetInt nbsi = new NonBlockingSetInt();
-    
-    // In 2 threads, add & remove even & odd elements concurrently
-    Thread t = new Thread() {
-        public void run() {
-          for( int j=0; j<100; j++ ) {
-            for( int i=0; i<1000; i+=2 )
-              nbsi.add(i);
-            for( int i=0; i<1000; i+=2 )
-              nbsi.remove(i);
-          }
-        }
-      };
-    t.start();
-    for( int j=0; j<100; j++ ) {
-      for( int i=1; i<1000; i+=2 )
-        nbsi.add(i);
-      for( int i=1; i<1000; i+=2 )
-        nbsi.remove(i);
-    }
-    t.join();
 
+    // In 2 threads, add & remove even & odd elements concurrently
+    Thread t1 = new Thread() { public void run() { work_helper(nbsi,"T1",1); } };
+    t1.start();
+    work_helper(nbsi,"T0",1);
+    t1.join();
+    
     // In the end, all members should be removed
+    StringBuffer buf = new StringBuffer();
+    buf.append("Should be emptyset but has these elements: {");
+    boolean found = false;
+    for( Integer x : nbsi ) {
+      buf.append(" ").append(x);
+      found = true;
+    }
+    if( found ) System.out.println(buf);
     assertThat( "concurrent size=0", nbsi.size(), is(0) );
     for( Integer x : nbsi ) {
       assertTrue("No elements so never get here",false);
     }
 
+  }
+
+  void work_helper(NonBlockingSetInt nbsi, String thrd, int d) {
+    final int ITERS = 100000;
+    for( int j=0; j<10; j++ ) {
+      long start = System.nanoTime();
+      for( int i=d; i<ITERS; i+=2 )
+        nbsi.add(i);
+      for( int i=d; i<ITERS; i+=2 )
+        nbsi.remove(i);
+      double delta_nanos = System.nanoTime()-start;
+      double delta_secs = delta_nanos/1000000000.0;
+      double ops = ITERS*2;
+      //System.out.println("Thrd"+thrd+" "+(ops/delta_secs)+" ops/sec size="+nbsi.size());
+    }
   }
 }

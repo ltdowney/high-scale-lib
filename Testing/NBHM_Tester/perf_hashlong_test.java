@@ -319,7 +319,7 @@ public class perf_hashlong_test extends Thread {
       if( x < _gr ) {
         get_ops++;
         String val = _hash.get(k);
-        if( val != null && val != key ) throw new IllegalArgumentException("Mismatched key="+key+" and val="+val);
+        if( val != null && val.equals(key) ) throw new IllegalArgumentException("Mismatched key="+key+" and val="+val);
       } else if( x < _pr ) {
         put_ops++;
 	_hash.putIfAbsent( k, key );
