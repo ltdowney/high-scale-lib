@@ -11,7 +11,6 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
 import sun.misc.Unsafe;
 import java.lang.reflect.*;
-//import com.azulsystems.util.Prefetch;
 
 public class NonBlockingHashMap<TypeK, TypeV> 
   extends AbstractMap<TypeK,TypeV> 
@@ -30,6 +29,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
     return _Obase + i * _Oscale;
   }
 
+  // Setup to use Unsafe
   private static final long _kvs_offset;
   static {                      // <clinit>
     Field f = null;
@@ -43,6 +43,8 @@ public class NonBlockingHashMap<TypeK, TypeV>
     return _unsafe.compareAndSwapObject(this, _kvs_offset, oldkvs, newkvs );
   }
 
+  // A simple boxing and unboxing scheme - a way to 'mark' any Value without
+  // hiding the actual value.
   public static final class Prime {
     public Object _V;
     Prime( Object V ) { _V = V; }
@@ -50,23 +52,40 @@ public class NonBlockingHashMap<TypeK, TypeV>
   }
 
 
-  // --- The Hash Table
+  // --- The Hash Table --------------------
   // Slot 0 is always used for a 'CHM' entry below to hold the interesting
-  // bits of the hash table.  Slot 1 holds full hashes.  Slots {2,3}, {4,5},
-  // etc hold {Key,Value} pairs.
+  // bits of the hash table.  Slot 1 holds full hashes as an array of ints.
+  // Slots {2,3}, {4,5}, etc hold {Key,Value} pairs.  The entire hash table
+  // can be atomically replaced by CASing the _kvs field.
+  //
+  // Why is CHM buried inside the _kvs Object array, instead of the other way
+  // around?  The CHM info is used during resize events and updates, but not
+  // during standard 'get' operations.  I assume 'get' is much more frequent
+  // than 'put'.  'get' can skip the extra indirection of skipping through the
+  // CHM to reach the _kvs array.
   private transient Object[] _kvs;
   private static final CHM   chm   (Object[] kvs) { return (CHM  )kvs[0]; }
   private static final int[] hashes(Object[] kvs) { return (int[])kvs[1]; }
   // Number of K,V pairs in the table
   public static final int len(Object[] kvs) { return (kvs.length-2)>>1; }
 
-  // --- Some misc minimum table size and Sentiel
-  private static final int MIN_SIZE_LOG=5;
+  // --- Minimum table size ----------------
+  // Pick size 16 K/V pairs, which turns into (16*2+2)*4+12 = 148 bytes on a
+  // standard 32-bit HotSpot, and (16*2+2)*8+12 = 284 bytes on 64-bit Azul.
+  private static final int MIN_SIZE_LOG=4;             // 
   private static final int MIN_SIZE=(1<<MIN_SIZE_LOG); // Must be power of 2
 
-  public static final Object CHECK_NEW_TABLE_SENTINEL = new Object(); // Sentinel
+  // --- Sentinels -------------------------
+  // No-Match-Old - putIfMatch does updates only if it matches the old value,
+  // and NO_MATCH_OLD basically counts as a wildcard match.
   public static final Object NO_MATCH_OLD = new Object(); // Sentinel
+  // This K/V pair has been deleted (but the Key slot is forever claimed).
+  // The same Key can be reinserted with a new value later.
   public static final Object TOMBSTONE = new Object();
+  // Prime'd or box'd version of TOMBSTONE.  This K/V pair was deleted, then a
+  // table resize started.  The K/V pair has been marked so that no new
+  // updates can happen to the old table (and since the K/V pair was deleted
+  // nothing was copied to the new table).
   public static final Prime  TOMBPRIME = new Prime(TOMBSTONE);
 
   // --- key,val -------------------------------------------------------------
@@ -92,16 +111,17 @@ public class NonBlockingHashMap<TypeK, TypeV>
     dump2(_kvs);
     System.out.println("=========");
   }
-  private final void dump( Object[] kvs) { 
+  // dump the entire state of the table
+  private final void dump( Object[] kvs ) { 
     for( int i=0; i<len(kvs); i++ ) {
       Object K = key(kvs,i);
       if( K != null ) {
-        String KS = (K == CHECK_NEW_TABLE_SENTINEL) ? "CHK" : K.toString();
+        String KS = (K == TOMBSTONE) ? "XXX" : K.toString();
         Object V = val(kvs,i);
-        String p = V instanceof Prime ? "prime_" : "";
-        String VS = (V == CHECK_NEW_TABLE_SENTINEL) ? "CHK" : (p+Prime.unbox(V));
-        if( Prime.unbox(V) == TOMBSTONE ) VS = "tombstone";
-        System.out.println(""+i+" ("+KS+","+VS+")");
+        Object U = Prime.unbox(V);
+        String p = (V==U) ? "" : "prime_";
+        String US = (U == TOMBSTONE) ? "tombstone" : U.toString();
+        System.out.println(""+i+" ("+KS+","+p+US+")");
       }
     }
     Object[] newkvs = chm(kvs)._newkvs; // New table, if any
@@ -110,17 +130,16 @@ public class NonBlockingHashMap<TypeK, TypeV>
       dump(newkvs);
     }
   }
-
+  // dump only the live values, broken down by the table they are in
   private final void dump2( Object[] kvs) { 
     for( int i=0; i<len(kvs); i++ ) {
       Object key = key(kvs,i);
-      Object val = Prime.unbox(val(kvs,i));
-      if( key != null && key != CHECK_NEW_TABLE_SENTINEL &&  // key is sane
-          val != null && val != CHECK_NEW_TABLE_SENTINEL &&  // val is sane
-          val != TOMBSTONE ) {
-        String p = val instanceof Prime ? "prime_" : "";
-        String VS = p+Prime.unbox(val);
-        System.out.println(""+i+" ("+key+","+VS+")");
+      Object val = val(kvs,i);
+      Object U = Prime.unbox(val);
+      if( key != null && key != TOMBSTONE &&  // key is sane
+          val != null && U   != TOMBSTONE ) { // val is sane
+        String p = (val==U) ? "" : "prime_";
+        System.out.println(""+i+" ("+key+","+p+val+")");
       }
     }
     Object[] newkvs = chm(kvs)._newkvs; // New table, if any
@@ -130,95 +149,36 @@ public class NonBlockingHashMap<TypeK, TypeV>
     }
   }
 
-  public void check() {
-    int livecnt = 0;
-    Object[] kvs = _kvs;
-    int sz = (int)chm(kvs)._size.sum(); // exact size check
-    while( kvs != null ) {
-      for( int i=0; i<len(kvs); i++ ) {
-        Object key = key(kvs,i);
-        Object val = Prime.unbox(val(kvs,i));
-        if( key != null && key != CHECK_NEW_TABLE_SENTINEL && // key is sane
-            val != null && val != CHECK_NEW_TABLE_SENTINEL && // val is sane
-            val != TOMBSTONE )
-          livecnt++;
-      }
-      kvs = chm(kvs)._newkvs; 
-    }
-    if( livecnt != sz ) {
-      //dump2(_kvs);
-      throw new Error("internal check failed size, found live="+livecnt+" but cached as "+sz);
-    }
-
-    // Repeat scan, doing a 'get' on all keys.  This may complete any nested resize ops
-    kvs = _kvs;
-    while( kvs != null ) {
-      for( int i=0; i<len(kvs); i++ ) {
-        Object key = key(kvs,i);
-        Object val = Prime.unbox(val(kvs,i));
-        if( key != null && key != CHECK_NEW_TABLE_SENTINEL && // key is sane
-            val != null && val != CHECK_NEW_TABLE_SENTINEL && // val is sane
-            val != TOMBSTONE ) {
-          if( !containsKey(key) )
-            throw new Error("internal check fails to get "+key); // 'get' fails to find key???
-        }
-      }
-      kvs = chm(kvs)._newkvs; 
-    }
-
-    // Repeat live-cnt after so many get's have finished all nested resize ops
-    livecnt = 0;
-    kvs = _kvs;
-    while( kvs != null ) {
-      for( int i=0; i<len(kvs); i++ ) {
-        Object key = key(kvs,i);
-        Object val = Prime.unbox(val(kvs,i));
-        if( key != null && key != CHECK_NEW_TABLE_SENTINEL && // key is sane
-            val != null && val != CHECK_NEW_TABLE_SENTINEL && // val is sane
-            val != TOMBSTONE )
-          livecnt++;
-      }
-      kvs = chm(kvs)._newkvs; 
-    }
-    if( livecnt != sz ) {
-      //dump();
-      throw new Error("internal check failed size 3, found live="+livecnt+" but cached as "+sz);
-    }
-  }
-
   // --- hash ----------------------------------------------------------------
   // Helper function to spread lousy hashCodes
   private static final int hash(Object key) {
-    int h = key.hashCode();
-    h ^= (h>>>20) ^ (h>>>12);
+    int h = key.hashCode();     // The real hashCode call
+    h ^= (h>>>20) ^ (h>>>12);   // Spread bits about
     h ^= (h>>> 7) ^ (h>>> 4);
     return h;
   }
 
   // --- NonBlockingHashMap --------------------------------------------------
   public NonBlockingHashMap( ) { this(MIN_SIZE); }
-  public NonBlockingHashMap( int initial_sz ) { this(initial_sz,true); }
-  public NonBlockingHashMap( int initial_sz, boolean memoize_hashes ) { 
-    initialize(initial_sz,memoize_hashes);
-  }
-  void initialize(int initial_sz, boolean memoize_hashes ) { 
+  public NonBlockingHashMap( int initial_sz ) { initialize(initial_sz); }
+  void initialize(int initial_sz ) { 
     if( initial_sz < 0 ) throw new IllegalArgumentException();
     int i;                      // Convert to next largest power-of-2
     for( i=MIN_SIZE_LOG; (1<<i) < initial_sz; i++ ) ;
     // Double size for K,V pairs, add 1 for CHM and 1 for hashes
     _kvs = new Object[((1<<i)<<1)+2];
     _kvs[0] = new CHM(new ConcurrentAutoTable()); // CHM in slot 0
-    if( memoize_hashes )        // Memoize or not?
-      _kvs[1] = new int[1<<i];  // Matching hash entries
+    _kvs[1] = new int[1<<i];                      // Matching hash entries
   }
 
   // --- wrappers ------------------------------------------------------------
   public int size() { return chm(_kvs).size(); }
   public boolean containsKey( Object key )            { return get(key) != null; }
+  public boolean contains   ( Object val )            { return contains(_kvs,val); }
   public TypeV put          ( TypeK  key, TypeV val ) { return (TypeV)putIfMatch( key,  val, NO_MATCH_OLD );  }
   public TypeV putIfAbsent  ( TypeK  key, TypeV val ) { return (TypeV)putIfMatch( key,  val, null );  }
   public TypeV remove       ( Object key )            { return (TypeV)putIfMatch( key, null, NO_MATCH_OLD );  }
-  public boolean remove     ( Object key, Object val ){ return        putIfMatch( key, null,  val ) == val; }
+  public boolean remove     ( Object key, Object val ){ return        putIfMatch( key, null, val ) == val; }
   public boolean replace    ( TypeK  key, TypeV  oldValue, TypeV newValue) {
     if (oldValue == null || newValue == null)  throw new NullPointerException();
     return putIfMatch( key, newValue, oldValue ) == oldValue;
@@ -226,13 +186,6 @@ public class NonBlockingHashMap<TypeK, TypeV>
   public TypeV replace( TypeK key, TypeV val ) {
     if (val == null)  throw new NullPointerException();
     return putIfAbsent( key, val );
-  }
-  public boolean contains( Object val ) { return contains(_kvs,val); }
-  public void clear() {         // Smack a new empty table down
-    Object[] newkvs = new NonBlockingHashMap(MIN_SIZE,_kvs[1] != null)._kvs;
-    while( !CAS_kvs(_kvs,newkvs) ) // Spin until the clear works
-      ;
-
   }
   private final Object putIfMatch( Object key, TypeV val, Object oldVal ) {
     Object newval = val;
@@ -251,86 +204,130 @@ public class NonBlockingHashMap<TypeK, TypeV>
     }
   }
 
+  // Atomically replace the k/v array with a new empty array
+  public void clear() {         // Smack a new empty table down
+    Object[] newkvs = new NonBlockingHashMap(MIN_SIZE)._kvs;
+    while( !CAS_kvs(_kvs,newkvs) ) // Spin until the clear works
+      ;
+  }
+
   // --- contains ------------------------------------------------------------
   // Search for matching value.
-  public final boolean contains( Object[] kvs, Object val ) {
+  private static final boolean contains( Object[] kvs, Object val ) {
     final int len = len(kvs);   // Count of key/value pairs
-    for( int i=0; i<len; i++ ) {
-      Object V = Prime.unbox(val(kvs,i));
-      if( V == val || val.equals(V) )
-        return true;
+    // Simple scan loop - assuming no table-copy in progress
+    int i;
+    for( i=0; i<len; i++ ) {    // Check the whole values array
+      Object V = val(kvs,i);    // Get a value
+      if( V == val || val.equals(V) ) // Equals?  Found it!
+        return true;            // Return hit
+      if( V instanceof Prime )  // Mid-copy?
+        break;                  // Oops, need slower scan
     }
-    CHM chm = chm(kvs);
-    return chm._newkvs == null ? false : contains(chm._newkvs,val);
+    if( i==len ) return false;  // Scanned whole table, must be a miss
+
+    // Slower scan loop; must keep checking for partially copied values
+    CHM chm = chm(kvs);         // 
+    Object[] newkvs = chm._newkvs; // Read the volatile only once
+    int copy_cnt = 0;           // Count of copied slots
+    for( ; i<len; i++ ) {       // Check the rest of the values array
+      Object V = val(kvs,i);    // Get a value
+      if( V == val || val.equals(V) ) // Equals?  Found it!
+        break;                  // Stop scanning, i<len indicates 'found'
+      if( V instanceof Prime ) {// Mid-copy?
+        // Mid-copy!  Force this slot to copy to the new table so that when we
+        // recursively scan the new table we'll find the updated value there.
+        // Note that is it incorrect to merely test the value in the box - as
+        // it might have been overridden in the new table.  The only thing we
+        // can do with a boxed value is copy it to the new table.
+        if( chm.copy_slot(i,kvs,newkvs) ) // Force this slot to copy
+          copy_cnt++;           // And count if this thread did the copy
+      }
+      // Periodically roll up any copy-counts and check for promotion
+      if( copy_cnt > 0 && (len&63)==63 ) {
+        chm.copy_check_and_promote(copy_cnt); 
+        copy_cnt=0;
+      }
+    }
+
+    if( copy_cnt > 0 )      // Roll up any copy-counts
+      chm.copy_check_and_promote(copy_cnt); 
+    if( i < len ) return true;  // Found it!
+    return contains(newkvs,val);// Not found in this table, so scan in next
   }
 
   // --- keyeq ---------------------------------------------------------------
   // Check for key equality.  Try direct pointer compare first, then see if
-  // the hashes are unequal (negative test) and finally do the full-on
+  // the hashes are unequal (fast negative test) and finally do the full-on
   // 'equals' v-call.
   private static boolean keyeq( Object K, Object key, int[] hashes, int hash, int fullhash ) {
     return 
       K==key ||             // Either keys match exactly OR
       // hash exists and matches?
-      ((hashes == null || hashes[hash] == 0 || hashes[hash] == fullhash) &&
+      ((hashes[hash] == 0 || hashes[hash] == fullhash) &&
        key.equals(K));          // Finally do the hard match
   }
 
   // --- get -----------------------------------------------------------------
-  // Get!  Can return 'null' to mean Tombstone or empty
+  // Get!  Returns 'null' to mean Tombstone or empty.  
+  // Never returns a Prime nor a Tombstone.
   public final TypeV get( Object key ) {
     Object V = get_impl(_kvs,key);
-    assert !(V instanceof Prime); // No prime in main oldest table
-    return V == TOMBSTONE ? null : (TypeV)V;
+    assert !(V instanceof Prime); // Never return a Prime
+    return (TypeV)V;
   }
-  private final Object get_recur( Object[] kvs, Object key ) {
-    return Prime.unbox(get_impl(kvs,key));
-  }
-  private final Object get_impl ( Object[] kvs, Object key ) {
-    final int fullhash = hash(key); // throws NullPointerException if key null
-    final int   len    = len   (kvs);  // Count of key/value pairs
-    final int[] hashes = hashes(kvs);
-    CHM chm = chm(kvs);
 
-    int hash = fullhash & (len-1); // First key hash
+  private static final Object get_impl( Object[] kvs, Object key ) {
+    final int fullhash = hash(key); // throws NullPointerException if key is null
+    final int   len    = len   (kvs); // Count of key/value pairs
+    CHM chm = chm(kvs);               // The CHM, for a volatile read below; reads slot 0 of kvs
+    final int[] hashes = hashes(kvs); // The memoized hashes; reads slot 1 of kvs
+
+    int idx = fullhash & (len-1); // First key hash
 
     // Main spin/reprobe loop, looking for a Key hit
     int reprobe_cnt=0;
     while( true ) {
-      final Object V = val(kvs,hash); // Get value before volatile read, could be Tombstone/empty or sentinel
-      final Object K = key(kvs,hash); // First key
-      if( K == null ) return null; // A clear miss
+      // Probe table
+      final Object V = val(kvs,idx); // Get value before volatile read, could be Tombstone/empty or sentinel
+      final Object K = key(kvs,idx); // First key
+      if( K == null ) return null;   // A clear miss
+
+      // We need a volatile-read here to preserve happens-before semantics on
+      // newly inserted Keys.  If the Key body was written just before inserting
+      // into the table a Key-compare here might read the uninitalized Key body.
+      // Annoyingly this means we have to volatile-read before EACH key compare.
+      // .
+      // We also need a volatile-read between reading a newly inserted Value
+      // and returning the Value (so the user might end up reading the stale
+      // Value contents).  Same problem as with keys - and the one volatile
+      // read covers both.
       Object[] dummy = chm._newkvs; // VOLATILE READ before key compare
-      if( keyeq(K,key,hashes,hash,fullhash) ) {
-        if( V != CHECK_NEW_TABLE_SENTINEL ) 
-          return V;
-        break;                  // Got a key hit, but wrong table!
+      
+      // Key-compare
+      if( keyeq(K,key,hashes,idx,fullhash) ) {
+        // Key hit!  Check for no table-copy-in-progress
+        if( !(V instanceof Prime) ) // No copy?
+          return (V == TOMBSTONE) ? null : V; // Return the value
+        // Key hit - but slot is copied.  Finish the copy & retry in the new table.  
+        Object[] newkvs = chm.copy_slot_and_check(idx,kvs); // Force this slot to copy
+        help_copy();                 // Help along any partial copy
+        return get_impl(newkvs,key); // Retry in the new table
       }
       // get and put must have the same key lookup logic!  But only 'put'
       // needs to force a table-resize for a too-long key-reprobe sequence.
-      // Check for reprobes on get.
-      if( K == CHECK_NEW_TABLE_SENTINEL ||
-          ++reprobe_cnt >= (REPROBE_LIMIT + (len>>2)) )
-        // This is treated as a MISS in this table.  If there is a new table,
-        // retry in that table and since we had to indirect to get there -
-        // assist in the copy to remove the old table (lest we get stuck
-        // paying indirection on every lookup).
-        break;
-      hash = (hash+1)&(len-1); // Reprobe by 1!  (should force a prefetch)
+      // Check for too-many-reprobes on get.
+      if( ++reprobe_cnt >= (REPROBE_LIMIT + (len>>2)) )
+        return null;            // This is treated as a MISS in this table.
+      idx = (idx+1)&(len-1);    // Reprobe by 1!  (should force a prefetch)
     }
-
-    // Found table-copy sentinel; retry the get on the new table then help copy
-    Object[] newkvs = chm._newkvs; // New table, if any; this counts as the volatile read needed between tables
-    if( newkvs == null ) return null; // No new table, so a clean miss.
-    help_copy();
-    return get_recur(newkvs,key); // Retry on the new table
   }
   
   // --- putIfMatch ---------------------------------------------------------
-  // Put, Remove, PutIfAbsent, etc.  Return the old value.  If the old value
-  // is equal to oldVal (or oldVal is NO_MATCH_OLD) then the put can be
+  // Put, Remove, PutIfAbsent, etc.  Return the old value.  If the returned
+  // value is equal to oldVal (or oldVal is NO_MATCH_OLD) then the put can be
   // assumed to work (although might have been immediately overwritten).
-  private final Object putIfMatch( Object[] kvs, Object key, Object putval, Object expVal ) {
+  private static final Object putIfMatch( Object[] kvs, Object key, Object putval, Object expVal ) {
     assert !(putval instanceof Prime);
     assert !(expVal instanceof Prime);
     assert putval != null;
@@ -629,7 +626,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
     // Help along an existing resize operation.
     private final void help_copy_impl( Object[] oldkvs, NonBlockingHashMap topmap, boolean copy_all ) {
       int oldlen = (int)len (oldkvs);
-      final int MIN_COPY_WORK = oldlen == 32 ? 16 : (oldlen == 64 ? 32 : 64);
+      final int MIN_COPY_WORK = Math.min(oldlen,64);
       Object[] newkvs = _newkvs;
 
       // Do copy-work first
@@ -674,14 +671,16 @@ public class NonBlockingHashMap<TypeK, TypeV>
     }
 
     
-    // --- copy_one_done -----------------------------------------------------
-    private final void copy_one_done( int i, Object[] oldkvs, Object[] newkvs, NonBlockingHashMap topmap ) {
-      if( copy_one(i,oldkvs,newkvs,topmap) )
-        copy_done(oldkvs,1,topmap);
+    // --- copy_slot_and_check -----------------------------------------------
+    // Copy slot 'i' from the old table to the new table.  If this thread
+    // confirmed the copy, update the counters and check for promotion.
+    private final void copy_slot_and_check( int idx, Object[] oldkvs ) {
+      if( copy_one(idx,oldkvs,_newkvs) )
+        copy_check_and_promote(1);
     }
 
     // --- copy_done ---------------------------------------------------------
-    private final void copy_done( Object[] oldkvs, int workdone, NonBlockingHashMap topmap ) {
+    private final void copy_check_and_promote( int workdone ) {
       // We made a slot unusable and so did some of the needed copy work
       long copyDone = _copyDone;
       while( !_copyDoneUpdater.compareAndSet(this,copyDone,copyDone+workdone) ) 
@@ -698,14 +697,21 @@ public class NonBlockingHashMap<TypeK, TypeV>
       }
     }    
 
-    // --- copy_one ----------------------------------------------------------
-    // Copy one K/V pair from oldkvs[i] to newkvs.  Returns true if we slammed
-    // a CHECK_NEW_TABLE_SENTINEL in the older table.  After some mental
-    // debate I decided that this routine will loop until the value is copied,
-    // instead of giving up on conflict.  This means that a poor helper thread
-    // might be stuck spinning until obstructing threads finish doing updates
-    // but those are limited to 1 late-arriving update per thread.
-    private final boolean copy_one( int idx, Object[] oldkvs, Object[] newkvs, NonBlockingHashMap topmap ) {
+    // --- copy_slot ---------------------------------------------------------
+    // Copy one K/V pair from oldkvs[i] to newkvs.  Returns true if we can
+    // confirm that the new table guaranteed has a value for this old-table
+    // slot.  We need an accurate confirmed-copy count so that we know when we
+    // can promote (if we promote the new table too soon, other threads may
+    // 'miss' on values not-yet-copied from the old table).  We don't allow
+    // any direct updates on the new table, unless they first happened to the
+    // old table - so that any transition in the new table from null to
+    // not-null must have been from a copy_slot (or other old-table overwrite)
+    // and not from a thread directly writing in the new table.  Thus we can
+    // count null-to-not-null transitions in the new table.
+    private static boolean copy_slot( int idx, Object[] oldkvs, Object[] newkvs ) {
+      if( true ) {
+        throw new Unimplemented();
+      } else {
       Object key = key(oldkvs,idx);
       if( key == CHECK_NEW_TABLE_SENTINEL ) // slot already dead?
         return false;           // Slot dead but we did not do it
@@ -803,7 +809,9 @@ public class NonBlockingHashMap<TypeK, TypeV>
           assert( !(val(newkvs,hash) instanceof Prime) );
       }
       return did_work;
-    } // end copy_one
+      }
+    } // end copy_slot
+    
   }
 
   // --- Snapshot ------------------------------------------------------------
