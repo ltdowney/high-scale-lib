@@ -12,6 +12,9 @@ import static org.hamcrest.CoreMatchers.*;
 
 // Test NonBlockingHashMap via JUnit
 public class NBHM_Tester2 extends TestCase {
+  public static void main(String args[]) {
+    org.junit.runner.JUnitCore.main("NBHM_Tester2");
+  }
 
   private NonBlockingHashMap<String,String> _nbhm;
   protected void setUp   () { _nbhm = new NonBlockingHashMap<String,String>(); }
