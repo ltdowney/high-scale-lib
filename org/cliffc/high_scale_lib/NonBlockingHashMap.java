@@ -175,11 +175,11 @@ public class NonBlockingHashMap<TypeK, TypeV>
   public int size() { return chm(_kvs).size(); }
   public boolean containsKey( Object key )            { return get(key) != null; }
   public boolean contains   ( Object val )            { return contains(this,_kvs,val); }
-  public TypeV put          ( TypeK  key, TypeV val ) { return (TypeV)putIfMatch( key,  val, NO_MATCH_OLD );  }
-  public TypeV putIfAbsent  ( TypeK  key, TypeV val ) { return (TypeV)putIfMatch( key,  val, TOMBSTONE    );  }
-  public TypeV remove       ( Object key )            { return (TypeV)putIfMatch( key, null, NO_MATCH_OLD );  }
+  public TypeV put          ( TypeK  key, TypeV val ) { return (TypeV)putIfMatch( key,      val,NO_MATCH_OLD);}
+  public TypeV putIfAbsent  ( TypeK  key, TypeV val ) { return (TypeV)putIfMatch( key,      val,TOMBSTONE   );}
+  public TypeV remove       ( Object key )            { return (TypeV)putIfMatch( key,TOMBSTONE,NO_MATCH_OLD);}
   public boolean remove     ( Object key, Object val ){ 
-    return putIfMatch( key, null, (val==null)?TOMBSTONE:val ) == val; 
+    return putIfMatch( key, TOMBSTONE, (val==null)?TOMBSTONE:val ) == val; 
   }
   public boolean replace    ( TypeK  key, TypeV  oldValue, TypeV newValue) {
     if (oldValue == null || newValue == null)  throw new NullPointerException();
@@ -189,12 +189,12 @@ public class NonBlockingHashMap<TypeK, TypeV>
     if (val == null)  throw new NullPointerException();
     return putIfAbsent( key, val );
   }
-  private final Object putIfMatch( Object key, TypeV val, Object oldVal ) {
-    Object newval = val;
-    assert    val != null;
+  private final Object putIfMatch( Object key, Object newVal, Object oldVal ) {
+    assert newVal != null;
     assert oldVal != null;
-    Object res = putIfMatch( this, _kvs, key, newval, oldVal );
+    Object res = putIfMatch( this, _kvs, key, newVal, oldVal, true );
     assert !(res instanceof Prime);
+    assert res != null;
     return res == TOMBSTONE ? null : res;
   }
 
@@ -336,10 +336,11 @@ public class NonBlockingHashMap<TypeK, TypeV>
   // --- putIfMatch ---------------------------------------------------------
   // Put, Remove, PutIfAbsent, etc.  Return the old value.  If the returned
   // value is equal to expVal (or expVal is NO_MATCH_OLD) then the put can be
-  // assumed to work (although might have been immediately overwritten).
-  private static final Object putIfMatch( NonBlockingHashMap topmap, Object[] kvs, Object key, Object putval, Object expVal ) {
+  // assumed to work (although might have been immediately overwritten).  Only
+  // the path through copy_slot passes in an expected value of null, and
+  // putIfMatch only returns a null if passed in an expected null.
+  private static final Object putIfMatch( NonBlockingHashMap topmap, Object[] kvs, Object key, Object putval, Object expVal, boolean update_size ) {
     assert putval != null;
-    assert expVal != null;
     assert !(putval instanceof Prime);
     assert !(expVal instanceof Prime);
     final int fullhash = hash(key); // throws NullPointerException if key null
@@ -359,7 +360,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
       if( K == null ) {         // Slot is free?
         // Found an empty Key slot - which means this Key has never been in
         // this table.  No need to put a Tombstone - the Key is not here!
-        if( putval == TOMBSTONE ) return null; // Not-now & never-been in this table
+        if( putval == TOMBSTONE ) return putval; // Not-now & never-been in this table
         // Claim the null key-slot
         if( CAS_key(kvs,idx, null, key ) ) { // Claim slot for Key
           chm._slots.add(1);      // Raise key-slots-used count
@@ -399,7 +400,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
         // We simply must have a new table to do a 'put'.  At this point a
         // 'get' will also go to the new table (if any).  We do not need
         // to claim a key slot (indeed, we cannot find a free one to claim!).
-        return putIfMatch(topmap,topmap.help_copy(chm.resize(kvs)),key,putval,expVal);
+        return putIfMatch(topmap,topmap.help_copy(chm.resize(kvs)),key,putval,expVal,update_size);
 
       idx = (idx+1)&(len-1); // Reprobe!
     } // End of spinning till we get a Key slot
@@ -435,7 +436,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
     // See if we are moving to a new table.  
     // If so, copy our slot and retry in the new table.
     if( newkvs != null )
-      return putIfMatch(topmap,chm.copy_slot_and_check(topmap,kvs,idx),key,putval,expVal);
+      return putIfMatch(topmap,chm.copy_slot_and_check(topmap,kvs,idx),key,putval,expVal,update_size);
 
     // ---
     // We are finally prepared to update the existing table
@@ -450,22 +451,33 @@ public class NonBlockingHashMap<TypeK, TypeV>
         V != expVal &&          // No instant match already?
         !(V==null && expVal == TOMBSTONE) &&  // Match on null/TOMBSTONE combo
         (expVal == null || !expVal.equals(V)) ) // Expensive equals check at the last
-      return V;                 // Do not update!
+      return expVal;            // Do not update!
 
     // Actually change the Value in the Key,Value pair
     if( CAS_val(kvs, idx, V, putval ) ) {
       // CAS succeeded - we did the update!
-      // Adjust sizes - a striped counter
-      if(  (V == null || V == TOMBSTONE) && putval != TOMBSTONE ) chm._size.add( 1);
-      if( !(V == null || V == TOMBSTONE) && putval == TOMBSTONE ) chm._size.add(-1);
-    } else {
-      // actually if the oldval changes to a 'prime' we must retry
-      throw new Error("Unimplemented");
+      // Both normal put's and table-copy calls putIfMatch, but table-copy
+      // does not (effectively) increase the number of live k/v pairs.
+      if( update_size ) {
+        // Adjust sizes - a striped counter
+        if(  (V == null || V == TOMBSTONE) && putval != TOMBSTONE ) chm._size.add( 1);
+        if( !(V == null || V == TOMBSTONE) && putval == TOMBSTONE ) chm._size.add(-1);
+      }
+    } else {                    // Else CAS failed
+      Object V2 = val(kvs,idx); // Get new value
+      // If a Prime'd value got installed, we need to re-run the put on the
+      // new table.  Otherwise we lost the CAS to another racing put.
+      // Simply retry from the start.
+      if( V2 instanceof Prime ) {
+        System.out.println("untested, failed to insert value because of prime");
+        return putIfMatch(topmap,kvs,key,putval,expVal,update_size);
+      }
     }
     // Win or lose the CAS, we are done.  If we won then we know the update
     // happened as expected.  If we lost, it means "we won but another thread
     // immediately stomped our update with no chance of a reader reading".
-    return V; 
+    if( expVal != NO_MATCH_OLD ) return expVal;
+    return (V==null) ? TOMBSTONE : V;
   }
     
   // --- help_copy ---------------------------------------------------------
@@ -708,11 +720,15 @@ public class NonBlockingHashMap<TypeK, TypeV>
       
         // We now know what to copy.  Try to copy.
         int workdone = 0;
+        //for( int i=0; i<MIN_COPY_WORK; i++ )
+        //  if( copy_slot(topmap,(copyidx+i)&(oldlen-1),oldkvs,newkvs) ) // Made an oldtable slot go dead?
+        //    workdone++;         // Yes!
+        //if( workdone > 0 )      // Report work-done occasionally
+        //  copy_check_and_promote( topmap, oldkvs, workdone );// See if we can promote
         for( int i=0; i<MIN_COPY_WORK; i++ )
           if( copy_slot(topmap,(copyidx+i)&(oldlen-1),oldkvs,newkvs) ) // Made an oldtable slot go dead?
-            workdone++;         // Yes!
-        if( workdone > 0 )      // Report work-done occasionally
-          copy_check_and_promote( topmap, oldkvs, workdone );// See if we can promote
+            copy_check_and_promote( topmap, oldkvs, 1 );// See if we can promote
+
         copyidx += MIN_COPY_WORK;
         if( panic_start == -1 ) // No panic?
           return;               // Then done copying after doing MIN_COPY_WORK
@@ -750,9 +766,16 @@ public class NonBlockingHashMap<TypeK, TypeV>
       assert chm(oldkvs) == this;
       // We made a slot unusable and so did some of the needed copy work
       long copyDone = _copyDone;
+      if( copyDone > len(oldkvs) ) {
+        System.out.println("My we were busy little beavers");
+      }
+      assert copyDone <= len(oldkvs);
       if( workdone > 0 )
         while( !_copyDoneUpdater.compareAndSet(this,copyDone,copyDone+workdone) ) 
           copyDone = _copyDone;   // Reload, retry
+      if( (copyDone+workdone) > len(oldkvs) ) {
+        System.out.println("My we are busy little beavers");
+      }
       assert (copyDone+workdone) <= len(oldkvs);
 
       // Check for copy being ALL done, and promote.  Note that we might have
@@ -818,7 +841,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
       // transition in this copy.
       Object old_unboxed = ((Prime)oldval)._V;
       assert old_unboxed != TOMBSTONE;
-      boolean copied_into_new = (putIfMatch(topmap, newkvs, key, old_unboxed, null) == null);
+      boolean copied_into_new = (putIfMatch(topmap, newkvs, key, old_unboxed, null,false) == null);
 
       // ---
       // Finally, now that any old value is exposed in the new table, we can
@@ -866,7 +889,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
     }
     public void remove() { 
       if( _prevV == null ) throw new IllegalStateException();
-      putIfMatch( NonBlockingHashMap.this, _kvs, _prevK, null, _prevV );
+      putIfMatch( NonBlockingHashMap.this, _kvs, _prevK, null, _prevV, true );
       _prevV = null;
     }
   }

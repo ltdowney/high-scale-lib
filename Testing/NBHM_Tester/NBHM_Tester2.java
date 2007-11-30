@@ -23,7 +23,7 @@ public class NBHM_Tester2 extends TestCase {
   // Test some basic stuff; add a few keys, remove a few keys
   public void testBasic() {
     assertTrue ( _nbhm.isEmpty() );
-    assertThat ( _nbhm.put("k1","v1"), nullValue() );
+    assertThat ( _nbhm.putIfAbsent("k1","v1"), nullValue() );
     checkSizes (1);
     assertThat ( _nbhm.put("k2","v2"), nullValue() );
     checkSizes (2);
@@ -119,6 +119,83 @@ public class NBHM_Tester2 extends TestCase {
     } catch(ClassNotFoundException ex) {
       ex.printStackTrace();
     }
-
   }
+
+  public void testIterationBig() {
+    assertThat( _nbhm.size(), is(0) );
+    for( int i=0; i<100; i++ ) 
+      _nbhm.put("k"+i,"v"+i);
+    assertThat( _nbhm.size(), is(100) );
+
+    int sz =0;
+    int sum = 0;
+    for( String s : _nbhm.keySet() ) {
+      sz++;
+      assertThat("",s.charAt(0),is('k'));
+      int x = Integer.parseInt(s.substring(1));
+      sum += x;
+      assertTrue(x>=0 && x<=99);
+    }
+    assertThat("Found 100 ints",sz,is(100));
+    assertThat("Found all integers in list",sum,is(100*99/2));
+
+    assertThat( "can remove 3", _nbhm.remove("k3"), is("v3") );
+    assertThat( "can remove 4", _nbhm.remove("k4"), is("v4") );
+    sz =0;
+    sum = 0;
+    for( String s : _nbhm.keySet() ) {
+      sz++;
+      assertThat("",s.charAt(0),is('k'));
+      int x = Integer.parseInt(s.substring(1));
+      sum += x;
+      assertTrue(x>=0 && x<=99);
+      String v = _nbhm.get(s);
+      assertThat("",v.charAt(0),is('v'));
+      assertThat("",s.substring(1),is(v.substring(1)));
+    }
+    assertThat("Found 98 ints",sz,is(98));
+    assertThat("Found all integers in list",sum,is(100*99/2 - (3+4)));
+  }
+
+  // Do some simple concurrent testing
+  public void testConcurrentSimple() throws InterruptedException {
+    final NonBlockingHashMap<String,String> nbhm = new NonBlockingHashMap<String,String>();
+
+    // In 2 threads, add & remove even & odd elements concurrently
+    Thread t1 = new Thread() { public void run() { work_helper(nbhm,"T1",1); } };
+    t1.start();
+    work_helper(nbhm,"T0",0);
+    t1.join();
+    
+    // In the end, all members should be removed
+    StringBuffer buf = new StringBuffer();
+    buf.append("Should be emptyset but has these elements: {");
+    boolean found = false;
+    for( String x : nbhm.keySet() ) {
+      buf.append(" ").append(x);
+      found = true;
+    }
+    if( found ) System.out.println(buf);
+    assertThat( "concurrent size=0", nbhm.size(), is(0) );
+    for( String x : nbhm.keySet() ) {
+      assertTrue("No elements so never get here",false);
+    }
+  }
+
+  void work_helper(NonBlockingHashMap<String,String> nbhm, String thrd, int d) {
+    final int ITERS = 100000;
+    for( int j=0; j<10; j++ ) {
+      long start = System.nanoTime();
+      for( int i=d; i<ITERS; i+=2 )
+        assertThat( "this key not in there, so putIfAbsent must work", 
+                    nbhm.putIfAbsent("k"+i,thrd), is((String)null) );
+      for( int i=d; i<ITERS; i+=2 )
+        assertTrue( nbhm.remove("k"+i,thrd) );
+      double delta_nanos = System.nanoTime()-start;
+      double delta_secs = delta_nanos/1000000000.0;
+      double ops = ITERS*2;
+      //System.out.println("Thrd"+thrd+" "+(ops/delta_secs)+" ops/sec size="+nbhm.size());
+    }
+  }
+
 }
