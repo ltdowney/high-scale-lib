@@ -175,7 +175,7 @@ public class NBHM_Tester2 extends TestCase {
       buf.append(" ").append(x);
       found = true;
     }
-    if( found ) System.out.println(buf);
+    if( found ) System.out.println(buf+" }");
     assertThat( "concurrent size=0", nbhm.size(), is(0) );
     for( String x : nbhm.keySet() ) {
       assertTrue("No elements so never get here",false);
@@ -183,7 +183,7 @@ public class NBHM_Tester2 extends TestCase {
   }
 
   void work_helper(NonBlockingHashMap<String,String> nbhm, String thrd, int d) {
-    final int ITERS = 100000;
+    final int ITERS = 20000;
     for( int j=0; j<10; j++ ) {
       long start = System.nanoTime();
       for( int i=d; i<ITERS; i+=2 )
