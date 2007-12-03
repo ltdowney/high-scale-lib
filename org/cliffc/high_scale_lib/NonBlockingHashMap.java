@@ -292,8 +292,8 @@ public class NonBlockingHashMap<TypeK, TypeV>
   private static final Object get_impl( final NonBlockingHashMap topmap, final Object[] kvs, final Object key ) {
     final int fullhash= hash (key); // throws NullPointerException if key is null
     final int len     = len  (kvs); // Count of key/value pairs, reads kvs.length 
-    final int[] hashes=hashes(kvs); // The memoized hashes; reads slot 1 of kvs
     final CHM chm     = chm  (kvs); // The CHM, for a volatile read below; reads slot 0 of kvs
+    final int[] hashes=hashes(kvs); // The memoized hashes; reads slot 1 of kvs
 
     int idx = fullhash & (len-1); // First key hash
 
@@ -351,8 +351,8 @@ public class NonBlockingHashMap<TypeK, TypeV>
     assert !(expVal instanceof Prime);
     final int fullhash = hash(key); // throws NullPointerException if key null
     final int len      = len   (kvs); // Count of key/value pairs, reads kvs.length
-    final int[] hashes = hashes(kvs); // Reads kvs[1], read before kvs[0]
     final CHM chm      = chm   (kvs); // Reads kvs[0]
+    final int[] hashes = hashes(kvs); // Reads kvs[1], read before kvs[0]
     int idx = fullhash & (len-1);
 
     // ---
@@ -670,7 +670,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
         //notifyAll();            // Wake up any sleepers
         //long nano = System.nanoTime();
         //System.out.println(" "+nano+" Resize from "+oldlen+" to "+(1<<log2)+" and had "+(_resizers-1)+" extras" );
-        System.out.print("[");
+        //System.out.print("[");
       } else                    // CAS failed?
         newkvs = _newkvs;       // Reread new table
       return newkvs;
@@ -730,18 +730,18 @@ public class NonBlockingHashMap<TypeK, TypeV>
       
         // We now know what to copy.  Try to copy.
         int workdone = 0;
-        //for( int i=0; i<MIN_COPY_WORK; i++ )
-        //  if( copy_slot(topmap,(copyidx+i)&(oldlen-1),oldkvs,newkvs) ) // Made an oldtable slot go dead?
-        //    workdone++;         // Yes!
-        //if( workdone > 0 )      // Report work-done occasionally
-        //  copy_check_and_promote( topmap, oldkvs, workdone );// See if we can promote
         for( int i=0; i<MIN_COPY_WORK; i++ )
           if( copy_slot(topmap,(copyidx+i)&(oldlen-1),oldkvs,newkvs) ) // Made an oldtable slot go dead?
-            copy_check_and_promote( topmap, oldkvs, 1 );// See if we can promote
+            workdone++;         // Yes!
+        if( workdone > 0 )      // Report work-done occasionally
+          copy_check_and_promote( topmap, oldkvs, workdone );// See if we can promote
+        //for( int i=0; i<MIN_COPY_WORK; i++ )
+        //  if( copy_slot(topmap,(copyidx+i)&(oldlen-1),oldkvs,newkvs) ) // Made an oldtable slot go dead?
+        //    copy_check_and_promote( topmap, oldkvs, 1 );// See if we can promote
 
         copyidx += MIN_COPY_WORK;
-        if( panic_start == -1 ) // No panic?
-          return;               // Then done copying after doing MIN_COPY_WORK
+        //if( panic_start == -1 ) // No panic?
+        //  return;               // Then done copying after doing MIN_COPY_WORK
       }
       // Extra promotion check, in case another thread finished all copying
       // then got stalled before promoting.
@@ -784,8 +784,8 @@ public class NonBlockingHashMap<TypeK, TypeV>
         copyDone = _copyDone;   // Reload, retry
         assert (copyDone+workdone) <= oldlen;
       }
-      if( (10*copyDone/oldlen) != (10*(copyDone+workdone)/oldlen) )
-        System.out.print("_"+(copyDone+workdone)*100/oldlen+"%");
+      //if( (10*copyDone/oldlen) != (10*(copyDone+workdone)/oldlen) )
+      //  System.out.print("_"+(copyDone+workdone)*100/oldlen+"%");
 
 
       // Check for copy being ALL done, and promote.  Note that we might have
@@ -798,7 +798,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
         topmap._last_resize_milli = System.currentTimeMillis();  // Record resize time for next check
         //long nano = System.nanoTime();
         //System.out.println(" "+nano+" Promote table to "+len(_newkvs));
-        System.out.print("]");
+        //System.out.print("]");
       }
     }
 
