@@ -740,6 +740,8 @@ public class NonBlockingHashMap<TypeK, TypeV>
         //    copy_check_and_promote( topmap, oldkvs, 1 );// See if we can promote
 
         copyidx += MIN_COPY_WORK;
+        // Uncomment this to turn on incremental table-copy.  Otherwise this
+        // thread continues to copy until it is all done.
         //if( panic_start == -1 ) // No panic?
         //  return;               // Then done copying after doing MIN_COPY_WORK
       }
