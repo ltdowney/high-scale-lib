@@ -703,7 +703,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
       Object[] newkvs = _newkvs;
       assert newkvs != null;    // Already checked by caller
       int oldlen = (int)len(oldkvs); // Total amount to copy
-      final int MIN_COPY_WORK = Math.min(oldlen,64); // Limit per-thread work
+      final int MIN_COPY_WORK = Math.min(oldlen,1024); // Limit per-thread work
 
       // ---
       int panic_start = -1;
@@ -740,10 +740,10 @@ public class NonBlockingHashMap<TypeK, TypeV>
         //    copy_check_and_promote( topmap, oldkvs, 1 );// See if we can promote
 
         copyidx += MIN_COPY_WORK;
-        // Uncomment this to turn on incremental table-copy.  Otherwise this
-        // thread continues to copy until it is all done.
-        //if( panic_start == -1 ) // No panic?
-        //  return;               // Then done copying after doing MIN_COPY_WORK
+        // Uncomment these next 2 lines to turn on incremental table-copy.
+        // Otherwise this thread continues to copy until it is all done.
+        if( panic_start == -1 ) // No panic?
+          return;               // Then done copying after doing MIN_COPY_WORK
       }
       // Extra promotion check, in case another thread finished all copying
       // then got stalled before promoting.
@@ -787,7 +787,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
         assert (copyDone+workdone) <= oldlen;
       }
       //if( (10*copyDone/oldlen) != (10*(copyDone+workdone)/oldlen) )
-      //  System.out.print("_"+(copyDone+workdone)*100/oldlen+"%");
+      //System.out.print(" "+(copyDone+workdone)*100/oldlen+"%"+"_"+(_copyIdx*100/oldlen)+"%");
 
 
       // Check for copy being ALL done, and promote.  Note that we might have

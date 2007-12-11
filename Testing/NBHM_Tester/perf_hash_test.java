@@ -100,7 +100,7 @@ public class perf_hash_test extends Thread {
     //  System.out.print(" "+histo[i]);
 
     System.out.println("Warmup -variance: ");
-    run_till_stable(Math.min(_thread_min,2),1);
+    run_till_stable(Math.min(_thread_min,2),/*extra warmup round for churn*/_read_ratio==0 ? 2 : 1);
 
     // Now do the real thing
     System.out.print("==== Counter  Threads   Trial: ");
@@ -119,7 +119,7 @@ public class perf_hash_test extends Thread {
       for( int i=1; i<names.length; i++ )
         run_till_stable(num_threads,num_trials,i);
     } else {
-      run_till_stable(num_threads,num_trials,5);
+      run_till_stable(num_threads,num_trials,4);
       run_till_stable(num_threads,num_trials,6);
     }
   }
@@ -128,7 +128,7 @@ public class perf_hash_test extends Thread {
     ConcurrentMap<String,String> HM = make_map(impl);
     if( HM == null ) return;
     String name = names[impl];
-    System.out.printf("=== %10.10s  %3d  cnts/sec=",name,num_threads);
+    System.out.printf("=== %10.10s  %3d",name,num_threads);
 
     // Quicky sanity check
     for( int i=0; i<100; i++ ) {
@@ -153,6 +153,8 @@ public class perf_hash_test extends Thread {
       long ops_per_sec = (sum*1000L)/millis;
       trials[j] = ops_per_sec;
       total += ops_per_sec;
+      if( j == 0 ) 
+        System.out.printf("  cnts/sec=");
       System.out.printf(" %10d",ops_per_sec);
 
       
