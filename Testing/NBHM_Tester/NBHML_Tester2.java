@@ -1,14 +1,22 @@
 /*
  * Written by Cliff Click and released to the public domain, as explained at
  * http://creativecommons.org/licenses/publicdomain
+ * Additional test cases provided by Andy Martin of TeleAtlas.
  */
 
-import org.cliffc.high_scale_lib.*;
-import java.util.*;
 import java.io.*;
+import java.util.*;
+import java.util.Map.Entry;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CompletionService;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorCompletionService;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import junit.framework.TestCase;
-import static org.junit.Assert.*;
+import org.cliffc.high_scale_lib.*;
 import static org.hamcrest.CoreMatchers.*;
+import static org.junit.Assert.*;
 
 // Test NonBlockingHashMapLong via JUnit
 public class NBHML_Tester2 extends TestCase {
@@ -99,7 +107,7 @@ public class NBHML_Tester2 extends TestCase {
 
     // Serialize it out
     try {
-      FileOutputStream fos = new FileOutputStream("NBHM_test.txt");
+      FileOutputStream fos = new FileOutputStream("NBHML_test.txt");
       ObjectOutputStream out = new ObjectOutputStream(fos);
       out.writeObject(_nbhml);
       out.close();
@@ -109,11 +117,13 @@ public class NBHML_Tester2 extends TestCase {
 
     // Read it back
     try {
-      FileInputStream fis = new FileInputStream("NBHM_test.txt");
+      File f = new File("NBHML_test.txt");
+      FileInputStream fis = new FileInputStream(f);
       ObjectInputStream in = new ObjectInputStream(fis);
       NonBlockingHashMapLong nbhml = (NonBlockingHashMapLong)in.readObject();
       in.close();
       assertEquals(_nbhml.toString(),nbhml.toString());
+      f.delete();
     } catch(IOException ex) {
       ex.printStackTrace();
     } catch(ClassNotFoundException ex) {
@@ -197,5 +207,117 @@ public class NBHML_Tester2 extends TestCase {
   }
 
 
+  // --- Customer Test Case 1 ------------------------------------------------
+  public final void testNonBlockingHashMapSize() {
+    NonBlockingHashMapLong<String> items = new NonBlockingHashMapLong<String>();
+    items.put(Long.valueOf(100), "100");
+    items.put(Long.valueOf(101), "101");
+    
+    assertEquals("keySet().size()", 2, items.keySet().size());
+    assertTrue("keySet().contains(100)", items.keySet().contains(Long.valueOf(100)));
+    assertTrue("keySet().contains(101)", items.keySet().contains(Long.valueOf(101)));
+    
+    assertEquals("values().size()", 2, items.values().size());
+    assertTrue("values().contains(\"100\")", items.values().contains("100"));
+    assertTrue("values().contains(\"101\")", items.values().contains("101"));
+    
+    assertEquals("entrySet().size()", 2, items.entrySet().size());
+    boolean found100 = false;
+    boolean found101 = false;
+    for (Entry<Long, String> entry : items.entrySet()) {
+      if (entry.getKey().equals(Long.valueOf(100))) {
+        assertEquals("entry[100].getValue()==\"100\"", "100", entry.getValue());
+        found100 = true;
+      } else if (entry.getKey().equals(Long.valueOf(101))) {
+        assertEquals("entry[101].getValue()==\"101\"", "101", entry.getValue());
+        found101 = true;
+      }
+    }
+    assertTrue("entrySet().contains([100])", found100);
+    assertTrue("entrySet().contains([101])", found101);
+  }
+  
+  // --- Customer Test Case 2 ------------------------------------------------
+  // Concurrent insertion & then iterator test.
+  static public void testNonBlockingHashMapIterator() throws InterruptedException {
+    final int ITEM_COUNT1 = 1000;
+    final int THREAD_COUNT = 5;
+    final int PER_CNT = ITEM_COUNT1/THREAD_COUNT;
+    final int ITEM_COUNT = PER_CNT*THREAD_COUNT; // fix roundoff for odd thread counts
+  
+    NonBlockingHashMapLong<TestKey> nbhml = new NonBlockingHashMapLong<TestKey>();
+    // use a barrier to open the gate for all threads at once to avoid rolling
+    // start and no actual concurrency
+    final CyclicBarrier barrier = new CyclicBarrier(THREAD_COUNT);
+    final ExecutorService ex = Executors.newFixedThreadPool(THREAD_COUNT);
+    final CompletionService<Object> co = new ExecutorCompletionService<Object>(ex);
+    for( int i=0; i<THREAD_COUNT; i++ )
+        co.submit(new NBHMLFeeder(nbhml, PER_CNT, barrier, i*PER_CNT));
+    for( int retCount = 0; retCount < THREAD_COUNT; retCount++ )
+      co.take();
+    
+    assertEquals("values().size()", ITEM_COUNT, nbhml.values().size());
+    assertEquals("entrySet().size()", ITEM_COUNT, nbhml.entrySet().size());
+    int itemCount = 0;
+    for( TestKey K : nbhml.values() )
+      itemCount++;
+    assertEquals("values().iterator() count", ITEM_COUNT, itemCount);
+  }
 
+  // --- NBHMLFeeder ---
+  // Class to be called from another thread, to get concurrent installs into
+  // the table.
+  static private class NBHMLFeeder implements Callable<Object> {
+    static private final Random _rand = new Random(System.currentTimeMillis());
+    private final NonBlockingHashMapLong<TestKey> _map;
+    private final int _count;
+    private final CyclicBarrier _barrier;
+    private final long _offset;
+    public NBHMLFeeder(final NonBlockingHashMapLong<TestKey> map, final int count, final CyclicBarrier barrier, final long offset) {
+      _map = map;
+      _count = count;
+      _barrier = barrier;
+      _offset = offset;
+    }
+    @Override
+    public Object call() throws Exception {
+      _barrier.await();         // barrier, to force racing start
+      for( long j=0; j<_count; j++ )
+        _map.put(j+_offset, new TestKey(_rand.nextLong(),_rand.nextInt (), (short) _rand.nextInt(Short.MAX_VALUE)));
+      return null;
+    }
+  }
+
+  // --- TestKey ---
+  // Funny key tests all sorts of things, has a pre-wired hashCode & equals.
+  static private final class TestKey {
+    // seeds for FNV hash
+    static private final int HASH_PRIME = 0x1000193;
+    static private final int HASH_SEED = (0x811C9DC5 * HASH_PRIME) ^ TestKey.class.hashCode();
+    // class members
+    public final short _s;
+    public final int   _i;
+    public final long  _l;
+    public final int _hash;
+    public TestKey(final long l, final int i, final short s) {
+      _l = l;
+      _i = i;
+      _s = s;
+      // calculate hash one time since the key is going to be used in maps and
+      // hashCode() may be called many times
+      _hash = ((((HASH_SEED * HASH_PRIME) ^ (int)(_l >>> 32) *
+                 HASH_PRIME) ^ (int)(_l) *
+                HASH_PRIME) ^ _s *
+               HASH_PRIME) ^ _i;
+    }
+    @Override public int hashCode() { return _hash;  }
+    @Override public boolean equals(Object object) {
+      if (null == object) return false;
+      if (object == this) return true;
+      if (object.getClass() != this.getClass()) return false;
+      final TestKey other = (TestKey) object;
+      return (this._l == other._l && this._i == other._i && this._s == other._s);
+    }
+    
+  }
 }

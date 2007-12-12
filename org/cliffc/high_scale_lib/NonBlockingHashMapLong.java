@@ -226,7 +226,7 @@ public class NonBlockingHashMapLong<TypeV>
 
   // --- CHM -----------------------------------------------------------------
   private static final class CHM<TypeV> implements Serializable {
-    final NonBlockingHashMapLong _nbhm;
+    final NonBlockingHashMapLong _nbhml;
 
     // These next 2 fields are used in the resizing heuristics, to judge when
     // it is time to resize or copy the table.  Slots is a count of used-up
@@ -285,8 +285,8 @@ public class NonBlockingHashMapLong<TypeV>
     final Object [] _vals;
    
     // Simple constructor
-    CHM( NonBlockingHashMapLong nbhm, int logsize ) {
-      _nbhm = nbhm;
+    CHM( final NonBlockingHashMapLong nbhml, final int logsize ) {
+      _nbhml = nbhml;
       _slots= new ConcurrentAutoTable();
       _last_resize_milli = System.currentTimeMillis();
       _keys = new long  [1<<logsize];
@@ -371,7 +371,7 @@ public class NonBlockingHashMapLong<TypeV>
       // Found table-copy sentinel; retry the get on the new table then help copy
       CHM chm = _newchm; // New table, if any; this counts as the volatile read needed between tables
       if( chm == null ) return null; // No new table, so a clean miss.
-      _nbhm.help_copy();
+      _nbhml.help_copy();
       return chm.get_recur(key); // Retry on the new table
     }
   
@@ -424,7 +424,7 @@ public class NonBlockingHashMapLong<TypeV>
           // We simply must have a new table to do a 'put'.  At this point a
           // 'get' will also go to the new table (if any).  We do not need
           // to claim a key slot (indeed, we cannot find a free one to claim!).
-          _nbhm.help_copy();
+          _nbhml.help_copy();
           return resize().putIfMatch(key,putval,expVal);
         }      
         hash = (hash+1)&(len-1); // Reprobe!
@@ -448,7 +448,7 @@ public class NonBlockingHashMapLong<TypeV>
         // table copy is in progress (i.e., limited by thread count).
         copy_one_done(hash);
         // Help any top-level copy along
-        _nbhm.help_copy();
+        _nbhml.help_copy();
         // Now put into the new table
         return newchm.putIfMatch(key,putval,expVal);
       }
@@ -469,8 +469,8 @@ public class NonBlockingHashMapLong<TypeV>
       if( CAS_val(hash, V, putval ) ) { // Note: no looping on this CAS failing
         // CAS succeeded - we did the update!
         // Adjust sizes - a striped counter
-        if(  (V == null || V == TOMBSTONE) && putval != TOMBSTONE ) _nbhm._size.add( 1);
-        if( !(V == null || V == TOMBSTONE) && putval == TOMBSTONE ) _nbhm._size.add(-1);
+        if(  (V == null || V == TOMBSTONE) && putval != TOMBSTONE ) _nbhml._size.add( 1);
+        if( !(V == null || V == TOMBSTONE) && putval == TOMBSTONE ) _nbhml._size.add(-1);
       }
       // Win or lose the CAS, we are done.  If we won then we know the update
       // happened as expected.  If we lost, it means "we won but another thread
@@ -506,14 +506,14 @@ public class NonBlockingHashMapLong<TypeV>
         if( newchm != null )    // See if resize is already in progress
           return newchm;        // Use the new table already
         // If we are a nested table, force the top-level table to finish resizing
-        CHM topchm = _nbhm._chm;
+        CHM topchm = _nbhml._chm;
         if( topchm == this ) break;  // We ARE the top-level table
         topchm.help_copy_impl(true); // Force the top-level table resize to finish
       }
       
       int oldlen = _keys.length; // Old count of K,V pairs allowed
       assert slots() >= REPROBE_LIMIT+(oldlen>>2); // No change in size needed?
-      int sz = _nbhm.size(); // Get current table count of active K,V pairs
+      int sz = _nbhml.size(); // Get current table count of active K,V pairs
       int newsz = sz;           // First size estimate
 
       // Heuristic to determine new size.  We expect plenty of dead-slots-with-keys 
@@ -558,7 +558,7 @@ public class NonBlockingHashMapLong<TypeV>
         return newchm;          // Use the new table already
 
       // Double size for K,V pairs
-      newchm = new CHM(_nbhm,log2);
+      newchm = new CHM(_nbhml,log2);
       // Another check after the slow allocation
       if( _newchm != null )     // See if resize is already in progress
         return _newchm;         // Use the new table already
@@ -660,7 +660,7 @@ public class NonBlockingHashMapLong<TypeV>
       // Check for copy being ALL done, and promote
       if( copyDone+workdone == _keys.length ) {
         //long nano = System.nanoTime();
-        if( _nbhm.CAS(_chm_offset,this,_newchm) ) { // Promote!
+        if( _nbhml.CAS(_chm_offset,this,_newchm) ) { // Promote!
           //System.out.println(" "+nano+" Promote table to "+len(_newkvs));
         }
       }
@@ -724,7 +724,7 @@ public class NonBlockingHashMapLong<TypeV>
           // Still in old table, but no space in new???
           long nano = System.nanoTime();
           long slots= newchm.slots();
-          System.out.println(""+nano+" copy oldslot="+idx+"/"+_keys.length+" K="+K+" no_slot="+cnt+"/"+len+" slots="+slots+" live="+_nbhm.size()+"");
+          System.out.println(""+nano+" copy oldslot="+idx+"/"+_keys.length+" K="+K+" no_slot="+cnt+"/"+len+" slots="+slots+" live="+_nbhml.size()+"");
           throw new RuntimeException("some kind of table copy resizing error");
         }
         hash = (hash+1)&(len-1); // Reprobe!
@@ -815,7 +815,7 @@ public class NonBlockingHashMapLong<TypeV>
     }
     public void remove() { 
       if( _prevV == null ) throw new IllegalStateException();
-      _chm._nbhm.remove(_prevK);
+      _chm._nbhml.remove(_prevK);
       _prevV = null;
     }
   }

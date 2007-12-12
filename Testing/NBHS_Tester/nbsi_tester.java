@@ -3,12 +3,12 @@
  * http://creativecommons.org/licenses/publicdomain
  */
 
-import org.cliffc.high_scale_lib.*;
-import java.util.*;
 import java.io.*;
+import java.util.*;
 import junit.framework.TestCase;
-import static org.junit.Assert.*;
+import org.cliffc.high_scale_lib.*;
 import static org.hamcrest.CoreMatchers.*;
+import static org.junit.Assert.*;
 
 // Test NonBlockingSetInt via JUnit
 public class nbsi_tester extends TestCase {
@@ -134,11 +134,13 @@ public class nbsi_tester extends TestCase {
 
     // Read it back
     try {
-      FileInputStream fis = new FileInputStream("NBSI_test.txt");
+      File f = new File("NBSI_test.txt");
+      FileInputStream fis = new FileInputStream(f);
       ObjectInputStream in = new ObjectInputStream(fis);
       NonBlockingSetInt nbsi = (NonBlockingSetInt)in.readObject();
       in.close();
       assertEquals(_nbsi.toString(),nbsi.toString());
+      f.delete();
     } catch(IOException ex) {
       ex.printStackTrace();
     } catch(ClassNotFoundException ex) {

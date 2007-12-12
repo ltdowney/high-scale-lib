@@ -3,12 +3,12 @@
  * http://creativecommons.org/licenses/publicdomain
  */
 
-import org.cliffc.high_scale_lib.*;
-import java.util.*;
 import java.io.*;
+import java.util.*;
 import junit.framework.TestCase;
-import static org.junit.Assert.*;
+import org.cliffc.high_scale_lib.*;
 import static org.hamcrest.CoreMatchers.*;
+import static org.junit.Assert.*;
 
 // Test NonBlockingHashSet via JUnit
 public class nbhs_tester extends TestCase {
@@ -118,11 +118,13 @@ public class nbhs_tester extends TestCase {
 
     // Read it back
     try {
-      FileInputStream fis = new FileInputStream("NBHS_test.txt");
+      File f = new File("NBHS_test.txt");
+      FileInputStream fis = new FileInputStream(f);
       ObjectInputStream in = new ObjectInputStream(fis);
       NonBlockingHashSet nbhs = (NonBlockingHashSet)in.readObject();
       in.close();
       assertEquals(_nbhs.toString(),nbhs.toString());
+      f.delete();
     } catch(IOException ex) {
       ex.printStackTrace();
     } catch(ClassNotFoundException ex) {

@@ -3,12 +3,12 @@
  * http://creativecommons.org/licenses/publicdomain
  */
 
-import org.cliffc.high_scale_lib.*;
-import java.util.*;
 import java.io.*;
+import java.util.*;
 import junit.framework.TestCase;
-import static org.junit.Assert.*;
+import org.cliffc.high_scale_lib.*;
 import static org.hamcrest.CoreMatchers.*;
+import static org.junit.Assert.*;
 
 // Test NonBlockingHashMap via JUnit
 public class NBHM_Tester2 extends TestCase {
@@ -109,11 +109,13 @@ public class NBHM_Tester2 extends TestCase {
 
     // Read it back
     try {
-      FileInputStream fis = new FileInputStream("NBHM_test.txt");
+      File f = new File("NBHM_test.txt");
+      FileInputStream fis = new FileInputStream(f);
       ObjectInputStream in = new ObjectInputStream(fis);
       NonBlockingHashMap nbhm = (NonBlockingHashMap)in.readObject();
       in.close();
       assertEquals(_nbhm.toString(),nbhm.toString());
+      f.delete();
     } catch(IOException ex) {
       ex.printStackTrace();
     } catch(ClassNotFoundException ex) {
@@ -198,5 +200,4 @@ public class NBHM_Tester2 extends TestCase {
       //System.out.println("Thrd"+thrd+" "+(ops/delta_secs)+" ops/sec size="+nbhm.size());
     }
   }
-
 }
