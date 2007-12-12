@@ -122,10 +122,11 @@ public class NBHM_Tester2 extends TestCase {
   }
 
   public void testIterationBig() {
+    final int CNT = 10000;
     assertThat( _nbhm.size(), is(0) );
-    for( int i=0; i<100; i++ ) 
+    for( int i=0; i<CNT; i++ ) 
       _nbhm.put("k"+i,"v"+i);
-    assertThat( _nbhm.size(), is(100) );
+    assertThat( _nbhm.size(), is(CNT) );
 
     int sz =0;
     int sum = 0;
@@ -134,10 +135,10 @@ public class NBHM_Tester2 extends TestCase {
       assertThat("",s.charAt(0),is('k'));
       int x = Integer.parseInt(s.substring(1));
       sum += x;
-      assertTrue(x>=0 && x<=99);
+      assertTrue(x>=0 && x<=(CNT-1));
     }
-    assertThat("Found 100 ints",sz,is(100));
-    assertThat("Found all integers in list",sum,is(100*99/2));
+    assertThat("Found 10000 ints",sz,is(CNT));
+    assertThat("Found all integers in list",sum,is(CNT*(CNT-1)/2));
 
     assertThat( "can remove 3", _nbhm.remove("k3"), is("v3") );
     assertThat( "can remove 4", _nbhm.remove("k4"), is("v4") );
@@ -148,13 +149,13 @@ public class NBHM_Tester2 extends TestCase {
       assertThat("",s.charAt(0),is('k'));
       int x = Integer.parseInt(s.substring(1));
       sum += x;
-      assertTrue(x>=0 && x<=99);
+      assertTrue(x>=0 && x<=(CNT-1));
       String v = _nbhm.get(s);
       assertThat("",v.charAt(0),is('v'));
       assertThat("",s.substring(1),is(v.substring(1)));
     }
-    assertThat("Found 98 ints",sz,is(98));
-    assertThat("Found all integers in list",sum,is(100*99/2 - (3+4)));
+    assertThat("Found "+(CNT-2)+" ints",sz,is(CNT-2));
+    assertThat("Found all integers in list",sum,is(CNT*(CNT-1)/2 - (3+4)));
   }
 
   // Do some simple concurrent testing
@@ -166,7 +167,7 @@ public class NBHM_Tester2 extends TestCase {
     t1.start();
     work_helper(nbhm,"T0",0);
     t1.join();
-    
+
     // In the end, all members should be removed
     StringBuffer buf = new StringBuffer();
     buf.append("Should be emptyset but has these elements: {");

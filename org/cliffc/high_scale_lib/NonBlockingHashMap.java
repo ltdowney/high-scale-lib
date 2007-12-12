@@ -152,6 +152,11 @@ public class NonBlockingHashMap<TypeK, TypeV>
     }
   }
 
+  // Count of reprobes
+  private ConcurrentAutoTable _reprobes = new ConcurrentAutoTable();
+  public long reprobes() { long r = _reprobes.sum(); _reprobes = new ConcurrentAutoTable(); return r; }
+  
+
   // --- hash ----------------------------------------------------------------
   // Helper function to spread lousy hashCodes
   private static final int hash(Object key) {
@@ -159,6 +164,15 @@ public class NonBlockingHashMap<TypeK, TypeV>
     h ^= (h>>>20) ^ (h>>>12);   // Spread bits about
     h ^= (h>>> 7) ^ (h>>> 4);
     return h;
+  }
+
+  // --- reprobe_limit -----------------------------------------------------
+  // Heuristic to decide if we have reprobed toooo many times.  Running over
+  // the reprobe limit on a 'get' call acts as a 'miss'; on a 'put' call it
+  // can trigger a table resize.  Several places must have exact agreement on
+  // what the reprobe_limit is, so we share it here.
+  private static final int reprobe_limit( int len ) {
+    return REPROBE_LIMIT + (len>>2);
   }
 
   // --- NonBlockingHashMap --------------------------------------------------
@@ -302,8 +316,8 @@ public class NonBlockingHashMap<TypeK, TypeV>
     while( true ) {
       // Probe table.  Each read of 'val' probably misses in cache in a big
       // table; hopefully the read of 'key' then hits in cache.
-      final Object V = val(kvs,idx); // Get value before volatile read, could be null or Tombstone or Prime
       final Object K = key(kvs,idx); // Get key   before volatile read, could be null
+      final Object V = val(kvs,idx); // Get value before volatile read, could be null or Tombstone or Prime
       if( K == null ) return null;   // A clear miss
 
       // We need a volatile-read here to preserve happens-before semantics on
@@ -332,7 +346,8 @@ public class NonBlockingHashMap<TypeK, TypeV>
       // get and put must have the same key lookup logic!  But only 'put'
       // needs to force a table-resize for a too-long key-reprobe sequence.
       // Check for too-many-reprobes on get.
-      if( ++reprobe_cnt >= (REPROBE_LIMIT + (len>>2)) ) // too many probes
+      //topmap._reprobes.add(1);
+      if( ++reprobe_cnt >= reprobe_limit(len) ) // too many probes
         return null;            // This is treated as a MISS in this table.
 
       idx = (idx+1)&(len-1);    // Reprobe by 1!  (could now prefetch)
@@ -402,7 +417,8 @@ public class NonBlockingHashMap<TypeK, TypeV>
       
       // get and put must have the same key lookup logic!  Lest 'get' give
       // up looking too soon.  
-      if( ++reprobe_cnt >= (REPROBE_LIMIT + (len>>2)) || // too many probes or
+      //topmap._reprobes.add(1);
+      if( ++reprobe_cnt >= reprobe_limit(len) || // too many probes or
           key == TOMBSTONE ) { // found a TOMBSTONE key, means no more keys
         // We simply must have a new table to do a 'put'.  At this point a
         // 'get' will also go to the new table (if any).  We do not need
@@ -564,9 +580,6 @@ public class NonBlockingHashMap<TypeK, TypeV>
       _slots= new ConcurrentAutoTable();
     }
 
-    NonBlockingSetInt _nbsi = new NonBlockingSetInt();
-
-
     // --- tableFull ---------------------------------------------------------
     // Heuristic to decide if this table is too full, and we should start a
     // new table.  Note that if a 'get' call has reprobed too many times and
@@ -575,13 +588,13 @@ public class NonBlockingHashMap<TypeK, TypeV>
     // end up deciding that the table is not full and inserting into the
     // current table, while a 'get' has decided the same key cannot be in this
     // table because of too many reprobes.  The invariant is:
-    //   slots.estimate_sum >= max_reprobe_cnt >= REPROBE_LIMIT+(len>>2)
+    //   slots.estimate_sum >= max_reprobe_cnt >= reprobe_limit(len)
     private final boolean tableFull( int reprobe_cnt, int len ) {
       return 
         // Do the cheap check first: we allow some number of reprobes always
         reprobe_cnt >= REPROBE_LIMIT &&
         // More expensive check: see if the table is > 1/4 full.
-        _slots.estimate_sum() >= REPROBE_LIMIT+(len>>2);
+        _slots.estimate_sum() >= reprobe_limit(len);
     }
 
     // --- resize ------------------------------------------------------------
@@ -600,7 +613,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
 
       // No copy in-progress, so start one.  First up: compute new table size.
       int oldlen = len(kvs);    // Old count of K,V pairs allowed
-      assert slots() >= REPROBE_LIMIT+(oldlen>>2); // No change in size needed?
+      assert slots() >= reprobe_limit(oldlen); // No change in size needed?
       int sz = size();          // Get current table count of active K,V pairs
       int newsz = sz;           // First size estimate
 
@@ -611,6 +624,10 @@ public class NonBlockingHashMap<TypeK, TypeV>
         if( sz >= (oldlen>>1) ) // If we are >50% full of keys then...
           newsz = oldlen<<2;    // Double double size
       }
+      // This heuristic in the next 2 lines leads to a much denser table
+      // with a higher reprobe rate
+      //if( sz >= (oldlen>>1) ) // If we are >50% full of keys then...
+      //  newsz = oldlen<<1;    // Double size
 
       // Last (re)size operation was very recent?  Then double again; slows
       // down resize operations for tables subject to a high key churn rate.
@@ -670,7 +687,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
         //notifyAll();            // Wake up any sleepers
         //long nano = System.nanoTime();
         //System.out.println(" "+nano+" Resize from "+oldlen+" to "+(1<<log2)+" and had "+(_resizers-1)+" extras" );
-        //System.out.print("[");
+        //System.out.print("["+log2);
       } else                    // CAS failed?
         newkvs = _newkvs;       // Reread new table
       return newkvs;
@@ -837,10 +854,8 @@ public class NonBlockingHashMap<TypeK, TypeV>
           // return with true here: any thread looking for a value for
           // this key can correctly go straight to the new table and
           // skip looking in the old table.
-          if( box == TOMBPRIME ) {
-            assert _nbsi.add(idx); // We better be the only thread returning true for this index
+          if( box == TOMBPRIME )
             return true;  
-          }
           // Otherwise we boxed something, but it still needs to be
           // copied into the new table.
           oldval = box;         // Record updated oldval
@@ -860,8 +875,6 @@ public class NonBlockingHashMap<TypeK, TypeV>
       Object old_unboxed = ((Prime)oldval)._V;
       assert old_unboxed != TOMBSTONE;
       boolean copied_into_new = (putIfMatch(topmap, newkvs, key, old_unboxed, null) == null);
-      if( copied_into_new ) 
-        assert _nbsi.add(idx); // We better be the only thread returning true for this index
 
       // ---
       // Finally, now that any old value is exposed in the new table, we can

@@ -12,6 +12,9 @@ import static org.hamcrest.CoreMatchers.*;
 
 // Test NonBlockingHashMapLong via JUnit
 public class NBHML_Tester2 extends TestCase {
+  public static void main(String args[]) {
+    org.junit.runner.JUnitCore.main("NBHML_Tester2");
+  }
 
   private NonBlockingHashMapLong<String> _nbhml;
   protected void setUp   () { _nbhml = new NonBlockingHashMapLong<String>(); }
@@ -118,4 +121,81 @@ public class NBHML_Tester2 extends TestCase {
     }
 
   }
+
+  public void testIterationBig() {
+    final int CNT = 10000;
+    assertThat( _nbhml.size(), is(0) );
+    for( int i=0; i<CNT; i++ ) 
+      _nbhml.put(i,"v"+i);
+    assertThat( _nbhml.size(), is(CNT) );
+
+    int sz =0;
+    int sum = 0;
+    for( long x : _nbhml.keySet() ) {
+      sz++;
+      sum += x;
+      assertTrue(x>=0 && x<=(CNT-1));
+    }
+    assertThat("Found 10000 ints",sz,is(CNT));
+    assertThat("Found all integers in list",sum,is(CNT*(CNT-1)/2));
+
+    assertThat( "can remove 3", _nbhml.remove(3), is("v3") );
+    assertThat( "can remove 4", _nbhml.remove(4), is("v4") );
+    sz =0;
+    sum = 0;
+    for( long x : _nbhml.keySet() ) {
+      sz++;
+      sum += x;
+      assertTrue(x>=0 && x<=(CNT-1));
+      String v = _nbhml.get(x);
+      assertThat("",v.charAt(0),is('v'));
+      assertThat("",x,is(Long.parseLong(v.substring(1))));
+    }
+    assertThat("Found "+(CNT-2)+" ints",sz,is(CNT-2));
+    assertThat("Found all integers in list",sum,is(CNT*(CNT-1)/2 - (3+4)));
+  }
+
+  // Do some simple concurrent testing
+  public void testConcurrentSimple() throws InterruptedException {
+    final NonBlockingHashMapLong<String> nbhml = new NonBlockingHashMapLong<String>();
+
+    // In 2 threads, add & remove even & odd elements concurrently
+    Thread t1 = new Thread() { public void run() { work_helper(nbhml,"T1",1); } };
+    t1.start();
+    work_helper(nbhml,"T0",0);
+    t1.join();
+
+    // In the end, all members should be removed
+    StringBuffer buf = new StringBuffer();
+    buf.append("Should be emptyset but has these elements: {");
+    boolean found = false;
+    for( long x : nbhml.keySet() ) {
+      buf.append(" ").append(x);
+      found = true;
+    }
+    if( found ) System.out.println(buf+" }");
+    assertThat( "concurrent size=0", nbhml.size(), is(0) );
+    for( long x : nbhml.keySet() ) {
+      assertTrue("No elements so never get here",false);
+    }
+  }
+
+  void work_helper(NonBlockingHashMapLong<String> nbhml, String thrd, int d) {
+    final int ITERS = 20000;
+    for( int j=0; j<10; j++ ) {
+      long start = System.nanoTime();
+      for( int i=d; i<ITERS; i+=2 )
+        assertThat( "this key not in there, so putIfAbsent must work", 
+                    nbhml.putIfAbsent(i,thrd), is((String)null) );
+      for( int i=d; i<ITERS; i+=2 )
+        assertTrue( nbhml.remove(i,thrd) );
+      double delta_nanos = System.nanoTime()-start;
+      double delta_secs = delta_nanos/1000000000.0;
+      double ops = ITERS*2;
+      //System.out.println("Thrd"+thrd+" "+(ops/delta_secs)+" ops/sec size="+nbhml.size());
+    }
+  }
+
+
+
 }
