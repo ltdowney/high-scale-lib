@@ -338,7 +338,7 @@ public class NonBlockingHashMapLong<TypeV>
       return Prime.unbox(get_impl(key));
     }
     private final Object get_impl ( long key ) {
-      final int fullhash = hash((int)key);
+      final int fullhash = hash(key);
       final int len = _keys.length;
       int hash = fullhash & (len-1); // First key hash
       
@@ -384,7 +384,7 @@ public class NonBlockingHashMapLong<TypeV>
       assert !(expVal instanceof Prime);
       assert putval != null;
       assert expVal != null;
-      final int fullhash = hash((int)key);
+      final int fullhash = hash(key);
       final int len = _keys.length;
       int hash = fullhash & (len-1);
       

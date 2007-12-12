@@ -7,12 +7,7 @@
 import java.io.*;
 import java.util.*;
 import java.util.Map.Entry;
-import java.util.concurrent.Callable;
-import java.util.concurrent.CompletionService;
-import java.util.concurrent.CyclicBarrier;
-import java.util.concurrent.ExecutorCompletionService;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.*;
 import junit.framework.TestCase;
 import org.cliffc.high_scale_lib.*;
 import static org.hamcrest.CoreMatchers.*;
@@ -170,10 +165,17 @@ public class NBHML_Tester2 extends TestCase {
     final NonBlockingHashMapLong<String> nbhml = new NonBlockingHashMapLong<String>();
 
     // In 2 threads, add & remove even & odd elements concurrently
-    Thread t1 = new Thread() { public void run() { work_helper(nbhml,"T1",1); } };
-    t1.start();
-    work_helper(nbhml,"T0",0);
-    t1.join();
+    final int num_thrds = 4;
+    Thread ts[] = new Thread[num_thrds];
+    for( int i=1; i<num_thrds; i++ ) {
+      final int x = i;
+      ts[i] = new Thread() { public void run() { work_helper(nbhml,x,num_thrds); } };
+    }
+    for( int i=1; i<num_thrds; i++ ) 
+      ts[i].start();
+    work_helper(nbhml,0,num_thrds);
+    for( int i=1; i<num_thrds; i++ ) 
+      ts[i].join();
 
     // In the end, all members should be removed
     StringBuffer buf = new StringBuffer();
@@ -190,14 +192,15 @@ public class NBHML_Tester2 extends TestCase {
     }
   }
 
-  void work_helper(NonBlockingHashMapLong<String> nbhml, String thrd, int d) {
+  void work_helper(NonBlockingHashMapLong<String> nbhml, int d, int num_thrds) {
+    String thrd = "T"+d;
     final int ITERS = 20000;
     for( int j=0; j<10; j++ ) {
       long start = System.nanoTime();
-      for( int i=d; i<ITERS; i+=2 )
+      for( int i=d; i<ITERS; i+=num_thrds )
         assertThat( "this key not in there, so putIfAbsent must work", 
                     nbhml.putIfAbsent(i,thrd), is((String)null) );
-      for( int i=d; i<ITERS; i+=2 )
+      for( int i=d; i<ITERS; i+=num_thrds )
         assertTrue( nbhml.remove(i,thrd) );
       double delta_nanos = System.nanoTime()-start;
       double delta_secs = delta_nanos/1000000000.0;
@@ -291,33 +294,166 @@ public class NBHML_Tester2 extends TestCase {
   // --- TestKey ---
   // Funny key tests all sorts of things, has a pre-wired hashCode & equals.
   static private final class TestKey {
-    // seeds for FNV hash
-    static private final int HASH_PRIME = 0x1000193;
-    static private final int HASH_SEED = (0x811C9DC5 * HASH_PRIME) ^ TestKey.class.hashCode();
-    // class members
-    public final short _s;
-    public final int   _i;
-    public final long  _l;
-    public final int _hash;
-    public TestKey(final long l, final int i, final short s) {
-      _l = l;
-      _i = i;
-      _s = s;
-      // calculate hash one time since the key is going to be used in maps and
-      // hashCode() may be called many times
-      _hash = ((((HASH_SEED * HASH_PRIME) ^ (int)(_l >>> 32) *
-                 HASH_PRIME) ^ (int)(_l) *
-                HASH_PRIME) ^ _s *
-               HASH_PRIME) ^ _i;
+    public final int  _type;
+    public final long _id;
+    public final int  _hash;
+    public TestKey(final long id, final int type, int hash) {
+      _id = id;
+      _type = type;
+      _hash = hash;
     }
-    @Override public int hashCode() { return _hash;  }
-    @Override public boolean equals(Object object) {
+    public int hashCode() { return _hash;  }
+    public boolean equals(Object object) {
       if (null == object) return false;
       if (object == this) return true;
       if (object.getClass() != this.getClass()) return false;
       final TestKey other = (TestKey) object;
-      return (this._l == other._l && this._i == other._i && this._s == other._s);
+      return (this._type == other._type && this._id == other._id);
     }
-    
+    public String toString() { return String.format("%s:%d,%d,%d", getClass().getSimpleName(), _id, _type, _hash);  }
   }
+
+  // --- Customer Test Case 3 ------------------------------------------------
+  private TestKeyFeeder getTestKeyFeeder() {
+    final TestKeyFeeder feeder = new TestKeyFeeder();
+    feeder.checkedPut(10401000001844L, 657829272, 680293140); // section 12
+    feeder.checkedPut(10401000000614L, 657829272, 401326994); // section 12
+    feeder.checkedPut(10400345749304L, 2095121916, -9852212); // section 12
+    feeder.checkedPut(10401000002204L, 657829272, 14438460); // section 12
+    feeder.checkedPut(10400345749234L, 1186831289, -894006017); // section 12
+    feeder.checkedPut(10401000500234L, 969314784, -2112018706); // section 12
+    feeder.checkedPut(10401000000284L, 657829272, 521425852); // section 12
+    feeder.checkedPut(10401000002134L, 657829272, 208406306); // section 12
+    feeder.checkedPut(10400345749254L, 2095121916, -341939818); // section 12
+    feeder.checkedPut(10401000500384L, 969314784, -2136811544); // section 12
+    feeder.checkedPut(10401000001944L, 657829272, 935194952); // section 12
+    feeder.checkedPut(10400345749224L, 1186831289, -828214183); // section 12
+    feeder.checkedPut(10400345749244L, 2095121916, -351234120); // section 12
+    feeder.checkedPut(10400333128994L, 2095121916, -496909430); // section 12
+    feeder.checkedPut(10400333197934L, 2095121916, 2147144926); // section 12
+    feeder.checkedPut(10400333197944L, 2095121916, -2082366964); // section 12
+    feeder.checkedPut(10400336947684L, 2095121916, -1404212288); // section 12
+    feeder.checkedPut(10401000000594L, 657829272, 124369790); // section 12
+    feeder.checkedPut(10400331896264L, 2095121916, -1028383492); // section 12
+    feeder.checkedPut(10400332415044L, 2095121916, 1629436704); // section 12
+    feeder.checkedPut(10400345749614L, 1186831289, 1027996827); // section 12
+    feeder.checkedPut(10401000500424L, 969314784, -1871616544); // section 12
+    feeder.checkedPut(10400336947694L, 2095121916, -1468802722); // section 12
+    feeder.checkedPut(10410002672481L, 2154973, 1515288586); // section 12
+    feeder.checkedPut(10410345749171L, 2154973, 2084791828); // section 12
+    feeder.checkedPut(10400004960671L, 2154973, 1554754674); // section 12
+    feeder.checkedPut(10410009983601L, 2154973, -2049707334); // section 12
+    feeder.checkedPut(10410335811601L, 2154973, 1547385114); // section 12
+    feeder.checkedPut(10410000005951L, 2154973, -1136117016); // section 12
+    feeder.checkedPut(10400004938331L, 2154973, -1361373018); // section 12
+    feeder.checkedPut(10410001490421L, 2154973, -818792874); // section 12
+    feeder.checkedPut(10400001187131L, 2154973, 649763142); // section 12
+    feeder.checkedPut(10410000409071L, 2154973, -614460616); // section 12
+    feeder.checkedPut(10410333717391L, 2154973, 1343531416); // section 12
+    feeder.checkedPut(10410336680071L, 2154973, -914544144); // section 12
+    feeder.checkedPut(10410002068511L, 2154973, -746995576); // section 12
+    feeder.checkedPut(10410336207851L, 2154973, 863146156); // section 12
+    feeder.checkedPut(10410002365251L, 2154973, 542724164); // section 12
+    feeder.checkedPut(10400335812581L, 2154973, 2146284796); // section 12
+    feeder.checkedPut(10410337345361L, 2154973, -384625318); // section 12
+    feeder.checkedPut(10410000409091L, 2154973, -528258556); // section 12
+    return feeder;
+  }
+
+  // ---
+  static private class TestKeyFeeder {
+    private final Hashtable<Integer, List<TestKey>> _items = new Hashtable<Integer, List<TestKey>>();
+    private int _size = 0;
+    public int size() { return _size;  }
+    // Put items into the hashtable, sorted by 'type' into LinkedLists.
+    public void checkedPut(final long id, final int type, final int hash) {
+      _size++;
+      final TestKey item = new TestKey(id, type, hash);
+      if( !_items.containsKey(type) ) 
+        _items.put(type, new LinkedList<TestKey>());
+      _items.get(type).add(item);
+    }
+    	
+    public NonBlockingHashMapLong<TestKey> getMapMultithreaded() throws InterruptedException, ExecutionException {
+      final int threadCount = _items.keySet().size();
+      final NonBlockingHashMapLong<TestKey> map = new NonBlockingHashMapLong<TestKey>();
+        	
+      // use a barrier to open the gate for all threads at once to avoid rolling start and no actual concurrency
+      final CyclicBarrier barrier = new CyclicBarrier(threadCount);
+      final ExecutorService ex = Executors.newFixedThreadPool(threadCount);
+      final CompletionService<Integer> co = new ExecutorCompletionService<Integer>(ex);
+      for( Integer type : _items.keySet() ) {
+        // A linked-list of things to insert
+        List<TestKey> items = _items.get(type);
+        TestKeyFeederThread feeder = new TestKeyFeederThread(type, items, map, barrier);
+        co.submit(feeder);
+      }
+        	
+      // wait for all threads to return
+      int itemCount = 0;
+      for( int retCount = 0; retCount < threadCount; retCount++ ) {
+        final Future<Integer> result = co.take();
+        itemCount += result.get();
+      }
+      return map;
+    }
+  }
+
+  // --- TestKeyFeederThread
+  static private class TestKeyFeederThread implements Callable<Integer> {
+    private final int _type;
+    private final NonBlockingHashMapLong<TestKey> _map;
+    private final List<TestKey> _items;
+    private final CyclicBarrier _barrier;
+    public TestKeyFeederThread(final int type, final List<TestKey> items, final NonBlockingHashMapLong<TestKey> map, final CyclicBarrier barrier) {
+      _type = type;
+      _map = map;
+      _items = items;
+      _barrier = barrier;
+    }
+    	
+    public Integer call() throws Exception {
+      _barrier.await();
+      int count = 0;
+      for( TestKey item : _items ) {
+        if (_map.contains(item._id)) {
+          System.err.printf("COLLISION DETECTED: %s exists\n", item.toString());
+        }
+        final TestKey exists = _map.putIfAbsent(item._id, item);
+        if (exists == null) {
+          count++;
+        } else {
+          System.err.printf("COLLISION DETECTED: %s exists as %s\n", item.toString(), exists.toString());
+        }
+      }
+      return count;
+    }
+  }
+
+  // --- 
+  public void testNonBlockingHashMapIteratorMultithreaded() throws InterruptedException, ExecutionException {
+    TestKeyFeeder feeder = getTestKeyFeeder();
+    final int itemCount = feeder.size();
+
+    // validate results
+    final NonBlockingHashMapLong<TestKey> items = feeder.getMapMultithreaded();
+    assertEquals("size()", itemCount, items.size());
+        
+    assertEquals("values().size()", itemCount, items.values().size());
+
+    assertEquals("entrySet().size()", itemCount, items.entrySet().size());
+
+    int iteratorCount = 0;
+    for( TestKey m : items.values() )
+      iteratorCount++;
+    // sometimes a different result comes back the second time
+    int iteratorCount2 = 0;
+    for( Iterator<TestKey> it = items.values().iterator(); it.hasNext(); ) {
+      iteratorCount2++;
+      it.next();
+    }
+    assertEquals("iterator counts differ", iteratorCount, iteratorCount2);
+    assertEquals("values().iterator() count", itemCount, iteratorCount);
+  }
+
 }
