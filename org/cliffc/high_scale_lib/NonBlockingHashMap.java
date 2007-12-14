@@ -24,33 +24,38 @@ public class NonBlockingHashMap<TypeK, TypeV>
   private static final Unsafe _unsafe = UtilUnsafe.getUnsafe();
   private static final int _Obase  = _unsafe.arrayBaseOffset(Object[].class);
   private static final int _Oscale = _unsafe.arrayIndexScale(Object[].class);
-  private static long rawIndex(Object[] ary, int i) {
-    assert i >= 0 && i < ary.length;
-    return _Obase + i * _Oscale;
+  private static long rawIndex(final Object[] ary, final int idx) {
+    assert idx >= 0 && idx < ary.length;
+    return _Obase + idx * _Oscale;
   }
 
-  // Setup to use Unsafe
+  // --- Setup to use Unsafe
   private static final long _kvs_offset;
   static {                      // <clinit>
     Field f = null;
-    try { 
-      f = NonBlockingHashMap.class.getDeclaredField("_kvs"); 
-    } catch( java.lang.NoSuchFieldException e ) {
-    } 
+    try { f = NonBlockingHashMap.class.getDeclaredField("_kvs"); }
+    catch( java.lang.NoSuchFieldException e ) { throw new RuntimeException(e); } 
     _kvs_offset = _unsafe.objectFieldOffset(f);
   }
-  private final boolean CAS_kvs( Object[] oldkvs, Object[] newkvs ) {
+  private final boolean CAS_kvs( final Object[] oldkvs, final Object[] newkvs ) {
     return _unsafe.compareAndSwapObject(this, _kvs_offset, oldkvs, newkvs );
   }
 
-  // A simple boxing and unboxing scheme - a way to 'mark' any Value without
-  // hiding the actual value.
+  // --- Adding a 'prime' bit onto Values via wrapping with a junk wrapper class
   public static final class Prime {
-    public Object _V;
+    public final Object _V;
     Prime( Object V ) { _V = V; }
     static Object unbox( Object V ) { return V instanceof Prime ? ((Prime)V)._V : V;  }
   }
 
+  // --- hash ----------------------------------------------------------------
+  // Helper function to spread lousy hashCodes
+  private static final int hash(final Object key) {
+    int h = key.hashCode();     // The real hashCode call
+    h ^= (h>>>20) ^ (h>>>12);
+    h ^= (h>>> 7) ^ (h>>> 4);
+    return h;
+  }
 
   // --- The Hash Table --------------------
   // Slot 0 is always used for a 'CHM' entry below to hold the interesting
@@ -70,7 +75,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
   public static final int len(Object[] kvs) { return (kvs.length-2)>>1; }
 
   // Time since last resize
-  private long _last_resize_milli;
+  private transient long _last_resize_milli;
 
   // --- Minimum table size ----------------
   // Pick size 16 K/V pairs, which turns into (16*2+2)*4+12 = 148 bytes on a
@@ -153,18 +158,9 @@ public class NonBlockingHashMap<TypeK, TypeV>
   }
 
   // Count of reprobes
-  private ConcurrentAutoTable _reprobes = new ConcurrentAutoTable();
-  public long reprobes() { long r = _reprobes.sum(); _reprobes = new ConcurrentAutoTable(); return r; }
-  
+  //private transient ConcurrentAutoTable _reprobes = new ConcurrentAutoTable();
+  //public long reprobes() { long r = _reprobes.sum(); _reprobes = new ConcurrentAutoTable(); return r; }
 
-  // --- hash ----------------------------------------------------------------
-  // Helper function to spread lousy hashCodes
-  private static final int hash(Object key) {
-    int h = key.hashCode();     // The real hashCode call
-    h ^= (h>>>20) ^ (h>>>12);   // Spread bits about
-    h ^= (h>>> 7) ^ (h>>> 4);
-    return h;
-  }
 
   // --- reprobe_limit -----------------------------------------------------
   // Heuristic to decide if we have reprobed toooo many times.  Running over
@@ -176,8 +172,9 @@ public class NonBlockingHashMap<TypeK, TypeV>
   }
 
   // --- NonBlockingHashMap --------------------------------------------------
+  // Constructors
   public NonBlockingHashMap( ) { this(MIN_SIZE); }
-  public NonBlockingHashMap( int initial_sz ) { initialize(initial_sz); }
+  public NonBlockingHashMap( final int initial_sz ) { initialize(initial_sz); }
   void initialize(int initial_sz ) { 
     if( initial_sz < 0 ) throw new IllegalArgumentException();
     int i;                      // Convert to next largest power-of-2
@@ -190,16 +187,16 @@ public class NonBlockingHashMap<TypeK, TypeV>
   }
 
   // --- wrappers ------------------------------------------------------------
-  public int size() { return chm(_kvs).size(); }
+  public int     size       ( )                       { return chm(_kvs).size(); }
   public boolean containsKey( Object key )            { return get(key) != null; }
-  public boolean contains   ( Object val )            { return contains(this,_kvs,val); }
-  public TypeV put          ( TypeK  key, TypeV val ) { return (TypeV)putIfMatch( key,      val,NO_MATCH_OLD);}
-  public TypeV putIfAbsent  ( TypeK  key, TypeV val ) { return (TypeV)putIfMatch( key,      val,TOMBSTONE   );}
-  public TypeV remove       ( Object key )            { return (TypeV)putIfMatch( key,TOMBSTONE,NO_MATCH_OLD);}
+  public boolean contains   ( Object val )            { return containsValue(val); }
+  public TypeV   put        ( TypeK  key, TypeV val ) { return (TypeV)putIfMatch( key,      val,NO_MATCH_OLD);}
+  public TypeV   putIfAbsent( TypeK  key, TypeV val ) { return (TypeV)putIfMatch( key,      val,TOMBSTONE   );}
+  public TypeV   remove     ( Object key )            { return (TypeV)putIfMatch( key,TOMBSTONE,NO_MATCH_OLD);}
   public boolean remove     ( Object key, Object val ){ 
     return putIfMatch( key, TOMBSTONE, (val==null)?TOMBSTONE:val ) == val; 
   }
-  public boolean replace    ( TypeK  key, TypeV  oldValue, TypeV newValue) {
+  public boolean replace    ( TypeK  key, TypeV  oldValue, TypeV newValue ) {
     if (oldValue == null || newValue == null)  throw new NullPointerException();
     return putIfMatch( key, newValue, oldValue ) == oldValue;
   }
@@ -210,7 +207,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
   private final Object putIfMatch( Object key, Object newVal, Object oldVal ) {
     assert newVal != null;
     assert oldVal != null;
-    Object res = putIfMatch( this, _kvs, key, newVal, oldVal );
+    final Object res = putIfMatch( this, _kvs, key, newVal, oldVal );
     assert !(res instanceof Prime);
     assert res != null;
     return res == TOMBSTONE ? null : res;
@@ -231,54 +228,13 @@ public class NonBlockingHashMap<TypeK, TypeV>
       ;
   }
 
-  // --- contains ------------------------------------------------------------
   // Search for matching value.
-  private static final boolean contains( NonBlockingHashMap topmap, Object[] kvs, Object val ) {
-    final int len = len(kvs);   // Count of key/value pairs
-    // Simple scan loop - assuming no table-copy in progress
-    int i;
-    for( i=0; i<len; i++ ) {    // Check the whole values array
-      Object V = val(kvs,i);    // Get a value
-      if( V == val || val.equals(V) ) // Equals?  Found it!
-        return true;            // Return hit
-      if( V instanceof Prime )  // Mid-copy?
-        break;                  // Oops, need slower scan
-    }
-    if( i==len ) return false;  // Scanned whole table, must be a miss
-
-    // Slower scan loop; must keep checking for partially copied values
-    CHM chm = chm(kvs);         // 
-    Object[] newkvs = chm._newkvs; // Read the volatile only once
-    int copy_cnt = 0;           // Count of copied slots
-    for( ; i<len; i++ ) {       // Check the rest of the values array
-      Object V = val(kvs,i);    // Get a value
-      if( V == val || val.equals(V) ) // Equals?  Found it!
-        break;                  // Stop scanning, i<len indicates 'found'
-      if( V instanceof Prime ) {// Mid-copy?
-        // Mid-copy!  Force this slot to copy to the new table so that when we
-        // recursively scan the new table we'll find the updated value there.
-        // Note that is it incorrect to merely test the value in the box - as
-        // it might have been overridden in the new table.  The only thing we
-        // can do with a boxed value is copy it to the new table.
-        // 
-        // Also note that we could use the single-shot copy_slot_and_check
-        // call, except that 'contains' scans the whole darned table.  Having
-        // found a Prime once we're likely to find a non-ending stream of
-        // them, so it's more efficient to do the promotion checks in bulk.
-        if( chm.copy_slot(topmap,i,kvs,newkvs) ) // Force this slot to copy
-          copy_cnt++;           // And count if this thread did the copy
-      }
-      // Periodically roll up any copy-counts and check for promotion
-      if( copy_cnt > 0 && (len&63)==63 ) {
-        chm.copy_check_and_promote(topmap,kvs,copy_cnt); 
-        copy_cnt=0;
-      }
-    }
-
-    if( copy_cnt > 0 )      // Roll up any copy-counts
-      chm.copy_check_and_promote(topmap,kvs,copy_cnt); 
-    if( i < len ) return true;  // Found it!
-    return contains(topmap,newkvs,val);// Not found in this table, so scan in next
+  public boolean containsValue( final Object val ) { 
+    if( val == null ) return false;
+    for( TypeV V : values() )
+      if( V == val || V.equals(val) )
+        return true;
+    return false;
   }
 
   // --- keyeq ---------------------------------------------------------------
@@ -298,7 +254,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
   // Get!  Returns 'null' to mean Tombstone or empty.  
   // Never returns a Prime nor a Tombstone.
   public final TypeV get( Object key ) {
-    Object V = get_impl(this,_kvs,key);
+    final Object V = get_impl(this,_kvs,key);
     assert !(V instanceof Prime); // Never return a Prime
     return (TypeV)V;
   }
@@ -364,7 +320,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
     assert putval != null;
     assert !(putval instanceof Prime);
     assert !(expVal instanceof Prime);
-    final int fullhash = hash(key); // throws NullPointerException if key null
+    final int fullhash = hash  (key); // throws NullPointerException if key null
     final int len      = len   (kvs); // Count of key/value pairs, reads kvs.length
     final CHM chm      = chm   (kvs); // Reads kvs[0]
     final int[] hashes = hashes(kvs); // Reads kvs[1], read before kvs[0]
@@ -515,7 +471,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
     Object[] topkvs = _kvs;
     CHM topchm = chm(topkvs);
     if( topchm._newkvs == null ) return helper; // No copy in-progress
-    topchm.help_copy_impl(this,topkvs);
+    topchm.help_copy_impl(this,topkvs,false);
     return helper;
   }
   
@@ -570,7 +526,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
     // could in parallel initialize the array.  Java does not allow
     // un-initialized array creation (especially of ref arrays!).
     volatile long _resizers;    // count of threads attempting an initial resize
-    static private final AtomicLongFieldUpdater<CHM> _resizerUpdater =
+    private static final AtomicLongFieldUpdater<CHM> _resizerUpdater =
       AtomicLongFieldUpdater.newUpdater(CHM.class, "_resizers");
 
     // ---
@@ -613,7 +569,6 @@ public class NonBlockingHashMap<TypeK, TypeV>
 
       // No copy in-progress, so start one.  First up: compute new table size.
       int oldlen = len(kvs);    // Old count of K,V pairs allowed
-      assert slots() >= reprobe_limit(oldlen); // No change in size needed?
       int sz = size();          // Get current table count of active K,V pairs
       int newsz = sz;           // First size estimate
 
@@ -715,7 +670,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
     // Help along an existing resize operation.  We hope its the top-level
     // copy (it was when we started) but this CHM might have been promoted out
     // of the top position.
-    private final void help_copy_impl( NonBlockingHashMap topmap, Object[] oldkvs ) {
+    private final void help_copy_impl( NonBlockingHashMap topmap, Object[] oldkvs, boolean copy_all ) {
       assert chm(oldkvs) == this;
       Object[] newkvs = _newkvs;
       assert newkvs != null;    // Already checked by caller
@@ -759,7 +714,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
         copyidx += MIN_COPY_WORK;
         // Uncomment these next 2 lines to turn on incremental table-copy.
         // Otherwise this thread continues to copy until it is all done.
-        if( panic_start == -1 ) // No panic?
+        if( !copy_all && panic_start == -1 ) // No panic?
           return;               // Then done copying after doing MIN_COPY_WORK
       }
       // Extra promotion check, in case another thread finished all copying
@@ -838,8 +793,9 @@ public class NonBlockingHashMap<TypeK, TypeV>
       // table is mid-resize.  We don't need to act on the results here,
       // because our correctness stems from box'ing the Value field.  Slamming
       // the Key field is a minor speed optimization.
-      final Object key1 = key(oldkvs,idx);
-      final Object key = (key1==null && CAS_key(oldkvs,idx, null, TOMBSTONE)) ? TOMBSTONE : key1;
+      Object key;
+      while( (key=key(oldkvs,idx)) == null )
+        CAS_key(oldkvs,idx, null, TOMBSTONE);
 
       // ---
       // Prevent new values from appearing in the old table.
@@ -890,12 +846,31 @@ public class NonBlockingHashMap<TypeK, TypeV>
   }
 
   // --- Snapshot ------------------------------------------------------------
+  // The main class for iterating over the NBHM.  It "snapshots" a clean
+  // view of the K/V array.
   class SnapshotV implements Iterator<TypeV> {
-    final Object[] _kvs;
-    public SnapshotV(Object[] kvs) { _kvs = kvs; next(); }
-    int length() { return len(_kvs); }
-    Object key(int idx) { return NonBlockingHashMap.key(_kvs,idx); }
-    private int _idx;           // 0-keys.length
+    final Object[] _sskvs;
+    public SnapshotV() { 
+      while( true ) {           // Verify no table-copy-in-progress
+        Object[] topkvs = _kvs;
+        CHM topchm = chm(topkvs);
+        if( topchm._newkvs == null ) { // No table-copy-in-progress
+          // The "linearization point" for the iteration.  Every key in this
+          // table will be visited, but keys added later might be skipped or
+          // even be added to a following table (also not iterated over).
+          _sskvs = topkvs; 
+          break; 
+        }
+        // Table copy in-progress - so we cannot get a clean iteration.  We
+        // must help finish the table copy before we can start iterating.
+        topchm.help_copy_impl(NonBlockingHashMap.this,topkvs,true);
+      }
+      // Warm-up the iterator
+      next(); 
+    }
+    int length() { return len(_sskvs); }
+    Object key(int idx) { return NonBlockingHashMap.key(_sskvs,idx); }
+    private int _idx;              // Varies from 0-keys.length
     private Object _nextK, _prevK; // Last 2 keys found
     private TypeV  _nextV, _prevV; // Last 2 values found
     public boolean hasNext() { return _nextV != null; }
@@ -922,7 +897,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
     }
     public void remove() { 
       if( _prevV == null ) throw new IllegalStateException();
-      putIfMatch( NonBlockingHashMap.this, _kvs, _prevK, null, _prevV );
+      putIfMatch( NonBlockingHashMap.this, _sskvs, _prevK, null, _prevV );
       _prevV = null;
     }
   }
@@ -933,14 +908,14 @@ public class NonBlockingHashMap<TypeK, TypeV>
       public void    clear   (          ) {        NonBlockingHashMap.this.clear   ( ); }
       public int     size    (          ) { return NonBlockingHashMap.this.size    ( ); }
       public boolean contains( Object v ) { return NonBlockingHashMap.this.containsValue(v); }
-      public Iterator<TypeV> iterator()   { return new SnapshotV(_kvs); }
+      public Iterator<TypeV> iterator()   { return new SnapshotV(); }
     };
   }
 
   // --- keySet --------------------------------------------------------------
   class SnapshotK implements Iterator<TypeK> {
     final SnapshotV _ss;
-    public SnapshotK(Object[] kvs) { _ss = new SnapshotV(kvs); }
+    public SnapshotK() { _ss = new SnapshotV(); }
     public void remove() { _ss.remove(); }
     public TypeK next() { _ss.next(); return (TypeK)_ss._prevK; }
     public boolean hasNext() { return _ss.hasNext(); }
@@ -951,7 +926,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
       public int     size    (          ) { return NonBlockingHashMap.this.size    ( ); }
       public boolean contains( Object k ) { return NonBlockingHashMap.this.containsKey(k); }
       public boolean remove  ( Object k ) { return NonBlockingHashMap.this.remove  (k) != null; }
-      public Iterator<TypeK> iterator()   { return new SnapshotK(_kvs); }
+      public Iterator<TypeK> iterator()   { return new SnapshotK(); }
     };
   }
 
@@ -967,7 +942,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
   }
   class SnapshotE implements Iterator<Map.Entry<TypeK,TypeV>> {
     final SnapshotV _ss;
-    public SnapshotE(Object[] kvs) { _ss = new SnapshotV(kvs); }
+    public SnapshotE() { _ss = new SnapshotV(); }
     public void remove() { _ss.remove(); }
     public Map.Entry<TypeK,TypeV> next() { _ss.next(); return new NBHMEntry((TypeK)_ss._prevK,_ss._prevV); }
     public boolean hasNext() { return _ss.hasNext(); }
@@ -987,7 +962,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
         TypeV v = get(e.getKey());
         return v.equals(e.getValue());
       }
-      public Iterator<Map.Entry<TypeK,TypeV>> iterator() { return new SnapshotE(_kvs); }
+      public Iterator<Map.Entry<TypeK,TypeV>> iterator() { return new SnapshotE(); }
     };
   }
 
@@ -995,18 +970,12 @@ public class NonBlockingHashMap<TypeK, TypeV>
   // Write a NBHM to a stream
   private void writeObject(java.io.ObjectOutputStream s) throws IOException  {
     s.defaultWriteObject();     // Nothing to write
-    final Object[] kvs = _kvs;  // The One Field is transient
-    for( int i=0; i<len(kvs); i++ ) {
-      final Object K = key(kvs,i);
-      if( K != null && K != TOMBSTONE ) { // Only serialize keys in this table
-        final Object V = get(K); // But do an official 'get' in case key is being copied
-        if( V != null ) {     // Key might have been deleted
-          s.writeObject(K);   // Write the <TypeK,TypeV> pair
-          s.writeObject(V);
-        }
-      }
+    for( Object K : keySet() ) {
+      final Object V = get(K);  // Do an official 'get'
+      s.writeObject(K);         // Write the <TypeK,TypeV> pair
+      s.writeObject(V);
     }
-    s.writeObject(null);      // Sentinel to indicate end-of-data
+    s.writeObject(null);        // Sentinel to indicate end-of-data
     s.writeObject(null);
   }
   
