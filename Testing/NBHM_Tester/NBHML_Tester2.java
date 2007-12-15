@@ -41,6 +41,11 @@ public class NBHML_Tester2 extends TestCase {
     assertThat ( _nbhml.remove(2), nullValue() );
     assertThat ( _nbhml.remove("k3"), nullValue() );
     assertTrue ( _nbhml.isEmpty() );
+
+    assertThat ( _nbhml.put(0,"v0"), nullValue() );
+    checkSizes (1);
+    assertThat ( _nbhml.remove(0), is("v0") );
+    checkSizes (0);
   }
 
   // Check all iterators for correct size counts
@@ -97,8 +102,8 @@ public class NBHML_Tester2 extends TestCase {
 
   public void testSerial() {
     assertTrue ( _nbhml.isEmpty() );
-    assertThat ( _nbhml.put(1,"v1"), nullValue() );
-    assertThat ( _nbhml.put(2,"v2"), nullValue() );
+    assertThat ( _nbhml.put(0x12345678L,"v1"), nullValue() );
+    assertThat ( _nbhml.put(0x87654321L,"v2"), nullValue() );
 
     // Serialize it out
     try {
@@ -165,7 +170,7 @@ public class NBHML_Tester2 extends TestCase {
     final NonBlockingHashMapLong<String> nbhml = new NonBlockingHashMapLong<String>();
 
     // In 2 threads, add & remove even & odd elements concurrently
-    final int num_thrds = 4;
+    final int num_thrds = 2;
     Thread ts[] = new Thread[num_thrds];
     for( int i=1; i<num_thrds; i++ ) {
       final int x = i;
@@ -198,10 +203,10 @@ public class NBHML_Tester2 extends TestCase {
     for( int j=0; j<10; j++ ) {
       long start = System.nanoTime();
       for( int i=d; i<ITERS; i+=num_thrds )
-        assertThat( "this key not in there, so putIfAbsent must work", 
-                    nbhml.putIfAbsent(i,thrd), is((String)null) );
+        assertThat( "key "+i+" not in there, so putIfAbsent must work", 
+                    nbhml.putIfAbsent((long)i,thrd), is((String)null) );
       for( int i=d; i<ITERS; i+=num_thrds )
-        assertTrue( nbhml.remove(i,thrd) );
+        assertTrue( nbhml.remove((long)i,thrd) );
       double delta_nanos = System.nanoTime()-start;
       double delta_secs = delta_nanos/1000000000.0;
       double ops = ITERS*2;
@@ -282,7 +287,6 @@ public class NBHML_Tester2 extends TestCase {
       _barrier = barrier;
       _offset = offset;
     }
-    @Override
     public Object call() throws Exception {
       _barrier.await();         // barrier, to force racing start
       for( long j=0; j<_count; j++ )
