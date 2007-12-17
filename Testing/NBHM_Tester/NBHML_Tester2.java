@@ -402,6 +402,7 @@ public class NBHML_Tester2 extends TestCase {
         final Future<Integer> result = co.take();
         itemCount += result.get();
       }
+      ex.shutdown();
       return map;
     }
   }

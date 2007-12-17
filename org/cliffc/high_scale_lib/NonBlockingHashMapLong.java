@@ -713,7 +713,7 @@ public class NonBlockingHashMapLong<TypeV>
           assert nowDone <= oldlen;
         }
         //if( (10*copyDone/oldlen) != (10*nowDone/oldlen) )
-        //System.out.print(" "+nowDone*100/oldlen+"%"+"_"+(_copyIdx*100/oldlen)+"%");
+        //  System.out.print(" "+nowDone*100/oldlen+"%"+"_"+(_copyIdx*100/oldlen)+"%");
       }
 
       // Check for copy being ALL done, and promote.  Note that we might have
@@ -749,7 +749,7 @@ public class NonBlockingHashMapLong<TypeV>
       // field.  Slamming the Key field is a minor speed optimization.
       long key;
       while( (key=_keys[idx]) == NO_KEY )
-        CAS_key(idx, NO_KEY, idx/*a key which hashes here*/);
+        CAS_key(idx, NO_KEY, (idx+_keys.length)/*a non-zero key which hashes here*/);
 
       // ---
       // Prevent new values from appearing in the old table.
