@@ -123,7 +123,7 @@ public class NBHML_Tester2 extends TestCase {
       NonBlockingHashMapLong nbhml = (NonBlockingHashMapLong)in.readObject();
       in.close();
       assertEquals(_nbhml.toString(),nbhml.toString());
-      f.delete();
+      if( !f.delete() ) throw new IOException("delete failed");
     } catch(IOException ex) {
       ex.printStackTrace();
     } catch(ClassNotFoundException ex) {

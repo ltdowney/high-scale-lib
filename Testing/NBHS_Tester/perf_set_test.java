@@ -76,7 +76,7 @@ public class perf_set_test extends Thread {
     if( _read_ratio == 0 ) KEYMAX = 1024*1024; // The churn test uses a large key set
     KEYS = new Integer[KEYMAX];
     for( int i=0; i<KEYMAX; i++ ) 
-      KEYS[i] = new Integer(i);
+      KEYS[i] = i;
 
     System.out.println("Warmup -variance: ");
     run(Math.min(_thread_min,2),1, impl);

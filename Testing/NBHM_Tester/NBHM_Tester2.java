@@ -115,7 +115,7 @@ public class NBHM_Tester2 extends TestCase {
       NonBlockingHashMap nbhm = (NonBlockingHashMap)in.readObject();
       in.close();
       assertEquals(_nbhm.toString(),nbhm.toString());
-      f.delete();
+      if( !f.delete() ) throw new IOException("delete failed");
     } catch(IOException ex) {
       ex.printStackTrace();
     } catch(ClassNotFoundException ex) {

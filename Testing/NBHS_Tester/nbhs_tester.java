@@ -124,7 +124,7 @@ public class nbhs_tester extends TestCase {
       NonBlockingHashSet nbhs = (NonBlockingHashSet)in.readObject();
       in.close();
       assertEquals(_nbhs.toString(),nbhs.toString());
-      f.delete();
+      if( !f.delete() ) throw new IOException("delete failed");
     } catch(IOException ex) {
       ex.printStackTrace();
     } catch(ClassNotFoundException ex) {

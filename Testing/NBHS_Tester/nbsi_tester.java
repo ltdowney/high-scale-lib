@@ -140,7 +140,7 @@ public class nbsi_tester extends TestCase {
       NonBlockingSetInt nbsi = (NonBlockingSetInt)in.readObject();
       in.close();
       assertEquals(_nbsi.toString(),nbsi.toString());
-      f.delete();
+      if( !f.delete() ) throw new IOException("delete failed");
     } catch(IOException ex) {
       ex.printStackTrace();
     } catch(ClassNotFoundException ex) {
