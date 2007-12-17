@@ -724,7 +724,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
 
     
     // --- copy_slot_and_check -----------------------------------------------
-    // Copy slot 'i' from the old table to the new table.  If this thread
+    // Copy slot 'idx' from the old table to the new table.  If this thread
     // confirmed the copy, update the counters and check for promotion.
     //
     // Returns the result of reading the volatile _newkvs, mostly as a

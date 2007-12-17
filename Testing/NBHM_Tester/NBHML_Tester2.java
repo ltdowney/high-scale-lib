@@ -259,11 +259,14 @@ public class NBHML_Tester2 extends TestCase {
     final CyclicBarrier barrier = new CyclicBarrier(THREAD_COUNT);
     final ExecutorService ex = Executors.newFixedThreadPool(THREAD_COUNT);
     final CompletionService<Object> co = new ExecutorCompletionService<Object>(ex);
-    for( int i=0; i<THREAD_COUNT; i++ )
-        co.submit(new NBHMLFeeder(nbhml, PER_CNT, barrier, i*PER_CNT));
-    for( int retCount = 0; retCount < THREAD_COUNT; retCount++ )
+    for( int i=0; i<THREAD_COUNT; i++ ) {
+      co.submit(new NBHMLFeeder(nbhml, PER_CNT, barrier, i*PER_CNT));
+    }
+    for( int retCount = 0; retCount < THREAD_COUNT; retCount++ ) {
       co.take();
-    
+    }
+    ex.shutdown();
+
     assertEquals("values().size()", ITEM_COUNT, nbhml.values().size());
     assertEquals("entrySet().size()", ITEM_COUNT, nbhml.entrySet().size());
     int itemCount = 0;

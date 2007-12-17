@@ -265,12 +265,9 @@ public class NonBlockingHashMapLong<TypeV>
     volatile CHM _newchm;
     private static final AtomicReferenceFieldUpdater<CHM,CHM> _newchmUpdater =
       AtomicReferenceFieldUpdater.newUpdater(CHM.class,CHM.class, "_newchm");
-    // Set the _newchm field if we can.
+    // Set the _newchm field if we can.  AtomicUpdaters do not fail spuriously.
     boolean CAS_newchm( CHM newchm ) { 
-      while( _newchm == null ) 
-        if( _newchmUpdater.compareAndSet(this,null,newchm) )
-          return true;
-      return false;
+      return _newchmUpdater.compareAndSet(this,null,newchm);
     }
     // Sometimes many threads race to create a new very large table.  Only 1
     // wins the race, but the losers all allocate a junk large table with
@@ -394,7 +391,6 @@ public class NonBlockingHashMapLong<TypeV>
       int reprobe_cnt=0;
       long   K = NO_KEY;
       Object V = null;
-      CHM newchm = null;
       while( true ) {           // Spin till we get a Key slot
         V = _vals[idx];         // Get old value
         K = _keys[idx];         // Get current key
@@ -434,7 +430,7 @@ public class NonBlockingHashMapLong<TypeV>
           // We simply must have a new table to do a 'put'.  At this point a
           // 'get' will also go to the new table (if any).  We do not need
           // to claim a key slot (indeed, we cannot find a free one to claim!).
-          newchm = resize();
+          final CHM newchm = resize();
           if( expVal != null ) _nbhml.help_copy(); // help along an existing copy
           return newchm.putIfMatch(key,putval,expVal);
         }
@@ -451,28 +447,14 @@ public class NonBlockingHashMapLong<TypeV>
 
       // See if we want to move to a new table (to avoid high average re-probe
       // counts).  We only check on the initial set of a Value from null to
-      // not-null (i.e., once per key-insert).  Of course we got a 'free' check
-      // of newchm once per key-compare (not really free, but paid-for by the
-      // time we get here).
-      if( newchm == null &&       // New table-copy already spotted?
-          // Once per fresh key-insert check the hard way
-          ((V == null && tableFull(reprobe_cnt,len)) ||
-           // Or we found a Prime, but the JMM allowed reordering such that we
-           // did not spot the new table (very rare race here: the writing
-           // thread did a CAS of _newchm then a store of a Prime.  This thread
-           // reads the Prime, then reads _newchm - but the read of Prime was so
-           // delayed (or the read of _newchm was so accelerated) that they
-           // swapped and we still read a null _newchm.  The resize call below
-           // will do a CAS on _newchm forcing the read.
-           V instanceof Prime) ) {
-        //if( V instanceof Prime ) 
-        //  throw new Error("Untested: very rare race with reordering reads of Prime with reads of _newchm");
-        newchm = resize(); // Force the new table copy to start
-      }
-      // See if we are moving to a new table.  
-      // If so, copy our slot and retry in the new table.
-      if( newchm != null )
+      // not-null (i.e., once per key-insert).
+      if( (V == null && tableFull(reprobe_cnt,len)) ||
+          // Or we found a Prime: resize is already in progress.  The resize
+          // call below will do a CAS on _newchm forcing the read.
+          V instanceof Prime) {
+        resize();               // Force the new table copy to start
         return copy_slot_and_check(idx,expVal).putIfMatch(key,putval,expVal);
+      }
       
       // ---
       // We are finally prepared to update the existing table
@@ -505,7 +487,7 @@ public class NonBlockingHashMapLong<TypeV>
         // new table.  Otherwise we lost the CAS to another racing put.
         // Simply retry from the start.
         if( V instanceof Prime )
-          return putIfMatch(key,putval,expVal);
+          return _newchm.putIfMatch(key,putval,expVal);
       }
       // Win or lose the CAS, we are done.  If we won then we know the update
       // happened as expected.  If we lost, it means "we won but another thread
@@ -602,7 +584,7 @@ public class NonBlockingHashMapLong<TypeV>
       if( newchm != null )      // See if resize is already in progress
         return newchm;          // Use the new table already
 
-      // Double size for K,V pairs, add 1 for CHM
+      // New CHM - actually allocate the big arrays
       newchm = new CHM(_nbhml,_size,log2);
       
       // Another check after the slow allocation
@@ -615,7 +597,7 @@ public class NonBlockingHashMapLong<TypeV>
         //notifyAll();            // Wake up any sleepers
         //long nano = System.nanoTime();
         //System.out.println(" "+nano+" Resize from "+oldlen+" to "+(1<<log2)+" and had "+(_resizers-1)+" extras" );
-        System.out.print("["+log2);
+        //System.out.print("["+log2);
       } else                    // CAS failed?
         newchm = _newchm;       // Reread new table
       return newchm;
@@ -696,7 +678,7 @@ public class NonBlockingHashMapLong<TypeV>
 
     
     // --- copy_slot_and_check -----------------------------------------------
-    // Copy slot 'i' from the old table to the new table.  If this thread
+    // Copy slot 'idx' from the old table to the new table.  If this thread
     // confirmed the copy, update the counters and check for promotion.
     //
     // Returns the result of reading the volatile _newchm, mostly as a
@@ -722,27 +704,29 @@ public class NonBlockingHashMapLong<TypeV>
       int oldlen = _keys.length;
       // We made a slot unusable and so did some of the needed copy work
       long copyDone = _copyDone;
-      assert (copyDone+workdone) <= oldlen;
+      long nowDone = copyDone+workdone;
+      assert nowDone <= oldlen;
       if( workdone > 0 ) {
-        while( !_copyDoneUpdater.compareAndSet(this,copyDone,copyDone+workdone) ) {
+        while( !_copyDoneUpdater.compareAndSet(this,copyDone,nowDone) ) {
           copyDone = _copyDone;   // Reload, retry
-          assert (copyDone+workdone) <= oldlen;
+          nowDone = copyDone+workdone;
+          assert nowDone <= oldlen;
         }
-        //if( (10*copyDone/oldlen) != (10*(copyDone+workdone)/oldlen) )
-        //System.out.print(" "+(copyDone+workdone)*100/oldlen+"%"+"_"+(_copyIdx*100/oldlen)+"%");
+        //if( (10*copyDone/oldlen) != (10*nowDone/oldlen) )
+        //System.out.print(" "+nowDone*100/oldlen+"%"+"_"+(_copyIdx*100/oldlen)+"%");
       }
 
       // Check for copy being ALL done, and promote.  Note that we might have
       // nested in-progress copies and manage to finish a nested copy before
       // finishing the top-level copy.  We only promote top-level copies.
-      if( copyDone+workdone == oldlen && // Ready to promote this table?
+      if( nowDone == oldlen &&   // Ready to promote this table?
           _nbhml._chm == this && // Looking at the top-level table?
           // Attempt to promote
           _nbhml.CAS(_chm_offset,this,_newchm) ) {
         _nbhml._last_resize_milli = System.currentTimeMillis();  // Record resize time for next check
         //long nano = System.nanoTime();
-        //System.out.println(" "+nano+" Promote table to "+_newchm._keys.length);
-        System.out.print("_"+oldlen+"."+_newchm._keys.length+"]");
+        //System.out.println(" "+nano+" Promote table "+oldlen+" to "+_newchm._keys.length);
+        //System.out.print("_"+oldlen+"]");
       }
     }
 
