@@ -158,8 +158,8 @@ public class NonBlockingHashMap<TypeK, TypeV>
   }
 
   // Count of reprobes
-  //private transient ConcurrentAutoTable _reprobes = new ConcurrentAutoTable();
-  //public long reprobes() { long r = _reprobes.sum(); _reprobes = new ConcurrentAutoTable(); return r; }
+  private transient ConcurrentAutoTable _reprobes = new ConcurrentAutoTable();
+  public long reprobes() { long r = _reprobes.sum(); _reprobes = new ConcurrentAutoTable(); return r; }
 
 
   // --- reprobe_limit -----------------------------------------------------
@@ -753,14 +753,14 @@ public class NonBlockingHashMap<TypeK, TypeV>
       // We made a slot unusable and so did some of the needed copy work
       long copyDone = _copyDone;
       assert (copyDone+workdone) <= oldlen;
-      //if( workdone > 0 )
-      while( !_copyDoneUpdater.compareAndSet(this,copyDone,copyDone+workdone) ) {
-        copyDone = _copyDone;   // Reload, retry
-        assert (copyDone+workdone) <= oldlen;
+      if( workdone > 0 ) {
+        while( !_copyDoneUpdater.compareAndSet(this,copyDone,copyDone+workdone) ) {
+          copyDone = _copyDone;   // Reload, retry
+          assert (copyDone+workdone) <= oldlen;
+        }
+        //if( (10*copyDone/oldlen) != (10*(copyDone+workdone)/oldlen) )
+        //System.out.print(" "+(copyDone+workdone)*100/oldlen+"%"+"_"+(_copyIdx*100/oldlen)+"%");
       }
-      //if( (10*copyDone/oldlen) != (10*(copyDone+workdone)/oldlen) )
-      //System.out.print(" "+(copyDone+workdone)*100/oldlen+"%"+"_"+(_copyIdx*100/oldlen)+"%");
-
 
       // Check for copy being ALL done, and promote.  Note that we might have
       // nested in-progress copies and manage to finish a nested copy before
@@ -842,8 +842,8 @@ public class NonBlockingHashMap<TypeK, TypeV>
 
       return copied_into_new;
     } // end copy_slot
-    
-  }
+  } // End of CHM
+
 
   // --- Snapshot ------------------------------------------------------------
   // The main class for iterating over the NBHM.  It "snapshots" a clean
@@ -897,7 +897,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
     }
     public void remove() { 
       if( _prevV == null ) throw new IllegalStateException();
-      putIfMatch( NonBlockingHashMap.this, _sskvs, _prevK, null, _prevV );
+      putIfMatch( NonBlockingHashMap.this, _sskvs, _prevK, TOMBSTONE, _prevV );
       _prevV = null;
     }
   }
@@ -934,7 +934,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
   // Warning: Each call to 'next' in this iterator constructs a new WriteThroughEntry.
   class NBHMEntry extends AbstractEntry<TypeK,TypeV> {
     NBHMEntry( final TypeK k, final TypeV v ) { super(k,v); }
-    public TypeV setValue(TypeV val) {
+    public TypeV setValue(final TypeV val) {
       if (val == null) throw new NullPointerException();
       _val = val;
       return put(_key, val);
@@ -953,12 +953,12 @@ public class NonBlockingHashMap<TypeK, TypeV>
       public int     size    (          ) { return NonBlockingHashMap.this.size ( ); }
       public boolean remove( final Object o ) {
         if (!(o instanceof Map.Entry)) return false;
-        Map.Entry<?,?> e = (Map.Entry<?,?>)o;
+        final Map.Entry<?,?> e = (Map.Entry<?,?>)o;
         return NonBlockingHashMap.this.remove(e.getKey(), e.getValue());
       }
       public boolean contains(final Object o) {
         if (!(o instanceof Map.Entry)) return false;
-        Map.Entry<?,?> e = (Map.Entry<?,?>)o;
+        final Map.Entry<?,?> e = (Map.Entry<?,?>)o;
         TypeV v = get(e.getKey());
         return v.equals(e.getValue());
       }
