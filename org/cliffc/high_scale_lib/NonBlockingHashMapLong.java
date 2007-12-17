@@ -211,9 +211,13 @@ public class NonBlockingHashMapLong<TypeV>
   // Get!  Returns 'null' to mean Tombstone or empty.  
   // Never returns a Prime nor a Tombstone.
   public final TypeV get( long key ) {
-    if( key == NO_KEY ) return _val_1 == TOMBSTONE ? null : (TypeV)_val_1;
+    if( key == NO_KEY ) {
+      final Object V = _val_1;
+      return V == TOMBSTONE ? null : (TypeV)V;
+    }
     final Object V = _chm.get_impl(key);
     assert !(V instanceof Prime); // Never return a Prime
+    assert V != TOMBSTONE;
     return (TypeV)V;
   }
 
