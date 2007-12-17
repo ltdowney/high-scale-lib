@@ -68,6 +68,9 @@ public class NonBlockingHashMapLong<TypeV>
   // Time since last resize
   private transient long _last_resize_milli;
 
+  // Optimize for space: use a 1/2-sized table and allow more re-probes
+  private final boolean _opt_for_space;
+
   // --- Minimum table size ----------------
   // Pick size 16 K/V pairs, which turns into (16*2)*4+12 = 140 bytes on a
   // standard 32-bit HotSpot, and (16*2)*8+12 = 268 bytes on 64-bit Azul.
@@ -118,8 +121,9 @@ public class NonBlockingHashMapLong<TypeV>
   }
 
   // Count of reprobes
-  private transient ConcurrentAutoTable _reprobes = new ConcurrentAutoTable();
-  public long reprobes() { long r = _reprobes.sum(); _reprobes = new ConcurrentAutoTable(); return r; }
+  //private transient ConcurrentAutoTable _reprobes = new ConcurrentAutoTable();
+  //public long reprobes() { long r = _reprobes.sum(); _reprobes = new ConcurrentAutoTable(); return r; }
+  public long reprobes() { return 0; /*reprobe tracking currently turned off*/ }
 
 
   // --- reprobe_limit -----------------------------------------------------
@@ -133,9 +137,14 @@ public class NonBlockingHashMapLong<TypeV>
 
   // --- NonBlockingHashMapLong ----------------------------------------------
   // Constructors
-  public NonBlockingHashMapLong( ) { this(MIN_SIZE); }
-  public NonBlockingHashMapLong( final int initial_sz ) { initialize(initial_sz); }
-  void initialize(int initial_sz ) { 
+  public NonBlockingHashMapLong( ) { this(MIN_SIZE,true); }
+  public NonBlockingHashMapLong( final int initial_sz ) { this(initial_sz,true); }
+  public NonBlockingHashMapLong( final boolean opt_for_space ) { this(1,opt_for_space); }
+  public NonBlockingHashMapLong( final int initial_sz, final boolean opt_for_space ) { 
+    _opt_for_space = opt_for_space;
+    initialize(initial_sz); 
+  }
+  private final void initialize( final int initial_sz ) { 
     if( initial_sz < 0 ) throw new IllegalArgumentException();
     int i;                      // Convert to next largest power-of-2
     for( i=MIN_SIZE_LOG; (1<<i) < initial_sz; i++ ) ;
@@ -531,15 +540,17 @@ public class NonBlockingHashMapLong<TypeV>
 
       // Heuristic to determine new size.  We expect plenty of dead-slots-with-keys 
       // and we need some decent padding to avoid endless reprobing.
-      if( sz >= (oldlen>>2) ) { // If we are >25% full of keys then...
-        newsz = oldlen<<1;      // Double size
+      if( _nbhml._opt_for_space ) {
+        // This heuristic leads to a much denser table with a higher reprobe rate
         if( sz >= (oldlen>>1) ) // If we are >50% full of keys then...
-          newsz = oldlen<<2;    // Double double size
+          newsz = oldlen<<1;    // Double size
+      } else {
+        if( sz >= (oldlen>>2) ) { // If we are >25% full of keys then...
+          newsz = oldlen<<1;      // Double size
+          if( sz >= (oldlen>>1) ) // If we are >50% full of keys then...
+            newsz = oldlen<<2;    // Double double size
+        }
       }
-      // This heuristic in the next 2 lines leads to a much denser table
-      // with a higher reprobe rate
-      //if( sz >= (oldlen>>1) ) // If we are >50% full of keys then...
-      //  newsz = oldlen<<1;    // Double size
 
       // Last (re)size operation was very recent?  Then double again; slows
       // down resize operations for tables subject to a high key churn rate.
@@ -547,11 +558,13 @@ public class NonBlockingHashMapLong<TypeV>
       long q=0;
       if( newsz <= oldlen &&    // New table would shrink or hold steady?
           tm <= _nbhml._last_resize_milli+10000 && // Recent resize (less than 1 sec ago)
-          (q=_slots.estimate_sum()) >= (sz<<1) ) // 1/2 of keys are dead?
+          //(q=_slots.estimate_sum()) >= (sz<<1) ) // 1/2 of keys are dead?
+          true )
         newsz = oldlen<<1;      // Double the existing size
 
       // Do not shrink, ever
       if( newsz < oldlen ) newsz = oldlen;
+      //System.out.println("old="+oldlen+" new="+newsz+" size()="+sz+" est_slots()="+q+" millis="+(tm-_nbhml._last_resize_milli));
 
       // Convert to power-of-2
       int log2;

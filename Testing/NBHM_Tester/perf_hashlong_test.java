@@ -85,7 +85,7 @@ public class perf_hashlong_test extends Thread {
   }
 
   static void run_till_stable( int num_threads, int num_trials ) throws Exception {
-    NonBlockingHashMapLong<String> HM = new NonBlockingHashMapLong();
+    NonBlockingHashMapLong<String> HM = new NonBlockingHashMapLong(true);
     String name = "NonBlockingHashMapLong";
     System.out.printf("=== %10.10s  %3d  cnts/sec=",name,num_threads);
 
@@ -319,7 +319,7 @@ public class perf_hashlong_test extends Thread {
       if( x < _gr ) {
         get_ops++;
         String val = _hash.get(k);
-        if( val != null && val.equals(key) ) throw new IllegalArgumentException("Mismatched key="+key+" and val="+val);
+        if( val != null && !val.equals(key) ) throw new IllegalArgumentException("Mismatched key="+key+" and val="+val);
       } else if( x < _pr ) {
         put_ops++;
 	_hash.putIfAbsent( k, key );
