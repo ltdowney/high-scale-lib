@@ -881,11 +881,12 @@ public class NonBlockingHashMapLong<TypeV>
   }
 
   // --- keySet --------------------------------------------------------------
-  class SnapshotK implements Iterator<Long> {
+  class IteratorLong implements Iterator<Long> {
     final SnapshotV _ss;
-    public SnapshotK() { _ss = new SnapshotV(); }
+    public IteratorLong() { _ss = new SnapshotV(); }
     public void remove() { _ss.remove(); }
-    public Long next() { _ss.next(); return _ss._prevK; }
+    public Long next    () { _ss.next(); return _ss._prevK; }
+    public long nextLong() { _ss.next(); return _ss._prevK; }
     public boolean hasNext() { return _ss.hasNext(); }
   }
   public Set<Long> keySet() {
@@ -894,9 +895,10 @@ public class NonBlockingHashMapLong<TypeV>
       public int     size    (          ) { return NonBlockingHashMapLong.this.size    ( ); }
       public boolean contains( Object k ) { return NonBlockingHashMapLong.this.containsKey(k); }
       public boolean remove  ( Object k ) { return NonBlockingHashMapLong.this.remove  (k) != null; }
-      public Iterator<Long> iterator()    { return new SnapshotK(); }
+      public IteratorLong iterator()    { return new IteratorLong(); }
     };
   }
+
 
   // --- entrySet ------------------------------------------------------------
   // Warning: Each call to 'next' in this iterator constructs a new Long and a
