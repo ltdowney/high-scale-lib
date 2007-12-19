@@ -81,6 +81,9 @@ public class NonBlockingHashMapLong<TypeV>
   // No-Match-Old - putIfMatch does updates only if it matches the old value,
   // and NO_MATCH_OLD basically counts as a wildcard match.
   public static final Object NO_MATCH_OLD = new Object(); // Sentinel
+  // Match-Any-not-null - putIfMatch does updates only if it find a real old
+  // value.
+  public static final Object MATCH_ANY = new Object(); // Sentinel
   // This K/V pair has been deleted (but the Key slot is forever claimed).
   // The same Key can be reinserted with a new value later.
   public static final Object TOMBSTONE = new Object();
@@ -170,7 +173,7 @@ public class NonBlockingHashMapLong<TypeV>
   }
   public TypeV replace( long key, TypeV val ) {
     if (val == null)  throw new NullPointerException();
-    return putIfAbsent( key, val );
+    return (TypeV)putIfMatch( key, val, MATCH_ANY );
   }
 
   private final Object putIfMatch( long key, Object newVal, Object oldVal ) {
@@ -180,6 +183,7 @@ public class NonBlockingHashMapLong<TypeV>
       final Object curVal = _val_1;
       if( oldVal == NO_MATCH_OLD || // Do we care about expected-Value at all?
           curVal == oldVal ||       // No instant match already?
+          (oldVal == MATCH_ANY && curVal != TOMBSTONE) ||
           oldVal.equals(curVal) )   // Expensive equals check
         CAS(_val_1_offset,curVal,newVal); // One shot CAS update attempt
       return curVal == TOMBSTONE ? null : curVal; // Return the last value present
@@ -479,10 +483,11 @@ public class NonBlockingHashMapLong<TypeV>
       // copy_slot.
 
       if( expVal != NO_MATCH_OLD && // Do we care about expected-Value at all?
-          V != expVal &&          // No instant match already?
-          !(V==null && expVal == TOMBSTONE) &&  // Match on null/TOMBSTONE combo
+          V != expVal &&        // No instant match already?
+          (expVal != MATCH_ANY || V == TOMBSTONE || V == null) &&
+          !(V==null && expVal == TOMBSTONE) &&    // Match on null/TOMBSTONE combo
           (expVal == null || !expVal.equals(V)) ) // Expensive equals check at the last
-        return expVal;            // Do not update!
+        return V;               // Do not update!
 
       // Actually change the Value in the Key,Value pair
       if( CAS_val(idx, V, putval ) ) {

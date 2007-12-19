@@ -28,12 +28,15 @@ public class NBHML_Tester2 extends TestCase {
     assertTrue ( _nbhml.isEmpty() );
     assertThat ( _nbhml.put(1,"v1"), nullValue() );
     checkSizes (1);
-    assertThat ( _nbhml.put(2,"v2"), nullValue() );
+    assertThat ( _nbhml.putIfAbsent(2,"v2"), nullValue() );
     checkSizes (2);
+    assertTrue ( _nbhml.containsKey(2) );
     assertThat ( _nbhml.put(1,"v1a"), is("v1") );
     assertThat ( _nbhml.put(2,"v2a"), is("v2") );
     checkSizes (2);
+    assertThat ( _nbhml.putIfAbsent(2,"v2b"), is("v2a") );
     assertThat ( _nbhml.remove(1), is("v1a") );
+    assertFalse( _nbhml.containsKey(1) );
     checkSizes (1);
     assertThat ( _nbhml.remove(1), nullValue() );
     assertThat ( _nbhml.remove(2), is("v2a") );
@@ -43,8 +46,28 @@ public class NBHML_Tester2 extends TestCase {
     assertTrue ( _nbhml.isEmpty() );
 
     assertThat ( _nbhml.put(0,"v0"), nullValue() );
+    assertTrue ( _nbhml.containsKey(0) );
     checkSizes (1);
     assertThat ( _nbhml.remove(0), is("v0") );
+    assertFalse( _nbhml.containsKey(0) );
+    checkSizes (0);
+
+    assertThat ( _nbhml.replace(0,"v0"), nullValue() );
+    assertFalse( _nbhml.containsKey(0) );
+    assertThat ( _nbhml.put(0,"v0"), nullValue() );
+    assertEquals(_nbhml.replace(0,"v0a"), "v0" );
+    assertEquals(_nbhml.get(0), "v0a" );
+    assertThat ( _nbhml.remove(0), is("v0a") );
+    assertFalse( _nbhml.containsKey(0) );
+    checkSizes (0);
+
+    assertThat ( _nbhml.replace(1,"v1"), nullValue() );
+    assertFalse( _nbhml.containsKey(1) );
+    assertThat ( _nbhml.put(1,"v1"), nullValue() );
+    assertEquals(_nbhml.replace(1,"v1a"), "v1" );
+    assertEquals(_nbhml.get(1), "v1a" );
+    assertThat ( _nbhml.remove(1), is("v1a") );
+    assertFalse( _nbhml.containsKey(1) );
     checkSizes (0);
   }
 
