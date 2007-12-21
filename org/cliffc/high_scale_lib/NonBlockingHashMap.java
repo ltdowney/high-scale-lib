@@ -193,27 +193,20 @@ public class NonBlockingHashMap<TypeK, TypeV>
   public int     size       ( )                       { return chm(_kvs).size(); }
   public boolean containsKey( Object key )            { return get(key) != null; }
   public boolean contains   ( Object val )            { return containsValue(val); }
-  public TypeV   put        ( TypeK  key, TypeV val ) { return (TypeV)putIfMatch( key,      val,NO_MATCH_OLD);}
-  public TypeV   putIfAbsent( TypeK  key, TypeV val ) { return (TypeV)putIfMatch( key,      val,TOMBSTONE   );}
-  public TypeV   remove     ( Object key )            { return (TypeV)putIfMatch( key,TOMBSTONE,NO_MATCH_OLD);}
-  public boolean remove     ( Object key, Object val ){ 
-    return putIfMatch( key, TOMBSTONE, (val==null)?TOMBSTONE:val ) == val; 
-  }
+  public TypeV   put        ( TypeK  key, TypeV val ) { return putIfMatch( key,      val,NO_MATCH_OLD);}
+  public TypeV   putIfAbsent( TypeK  key, TypeV val ) { return putIfMatch( key,      val,TOMBSTONE   );}
+  public TypeV   remove     ( Object key )            { return putIfMatch( key,TOMBSTONE,NO_MATCH_OLD);}
+  public boolean remove     ( Object key,Object val ) { return putIfMatch( key,TOMBSTONE,val ) == val ;}
+  public TypeV   replace    ( TypeK  key, TypeV val ) { return putIfMatch( key,      val,MATCH_ANY   );}
   public boolean replace    ( TypeK  key, TypeV  oldValue, TypeV newValue ) {
-    if (oldValue == null || newValue == null)  throw new NullPointerException();
     return putIfMatch( key, newValue, oldValue ) == oldValue;
   }
-  public TypeV replace( TypeK key, TypeV val ) {
-    if (val == null)  throw new NullPointerException();
-    return (TypeV)putIfMatch( key, val, MATCH_ANY );
-  }
-  private final Object putIfMatch( Object key, Object newVal, Object oldVal ) {
-    assert newVal != null;
-    assert oldVal != null;
+  private final TypeV putIfMatch( Object key, Object newVal, Object oldVal ) {
+    if (oldVal == null || newVal == null)  throw new NullPointerException();
     final Object res = putIfMatch( this, _kvs, key, newVal, oldVal );
     assert !(res instanceof Prime);
     assert res != null;
-    return res == TOMBSTONE ? null : res;
+    return res == TOMBSTONE ? null : (TypeV)res;
   }
 
   public void putAll(Map<? extends TypeK, ? extends TypeV> t) {

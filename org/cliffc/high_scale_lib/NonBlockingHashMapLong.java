@@ -161,24 +161,17 @@ public class NonBlockingHashMapLong<TypeV>
   public boolean isEmpty    ( )                     { return size()==0; }
   public boolean containsKey( long key )            { return get(key) != null; }
   public boolean contains   ( Object val )          { return containsValue(val); }
-  public TypeV   put        ( long key, TypeV val ) { return (TypeV)putIfMatch( key,      val,NO_MATCH_OLD);}
-  public TypeV   putIfAbsent( long key, TypeV val ) { return (TypeV)putIfMatch( key,      val,TOMBSTONE   );}
-  public TypeV   remove     ( long key )            { return (TypeV)putIfMatch( key,TOMBSTONE,NO_MATCH_OLD);}
-  public boolean remove     ( long key, Object val ){ 
-    return putIfMatch( key, TOMBSTONE, (val==null)?TOMBSTONE:val ) == val; 
-  }
+  public TypeV   put        ( long key, TypeV val ) { return putIfMatch( key,      val,NO_MATCH_OLD);}
+  public TypeV   putIfAbsent( long key, TypeV val ) { return putIfMatch( key,      val,TOMBSTONE   );}
+  public TypeV   remove     ( long key )            { return putIfMatch( key,TOMBSTONE,NO_MATCH_OLD);}
+  public boolean remove     ( long key,Object val ) { return putIfMatch( key,TOMBSTONE,val ) == val ;}
+  public TypeV   replace    ( long key, TypeV val ) { return putIfMatch( key,      val,MATCH_ANY   );}
   public boolean replace    ( long key, TypeV  oldValue, TypeV newValue ) {
-    if (oldValue == null || newValue == null)  throw new NullPointerException();
     return putIfMatch( key, newValue, oldValue ) == oldValue;
   }
-  public TypeV replace( long key, TypeV val ) {
-    if (val == null)  throw new NullPointerException();
-    return (TypeV)putIfMatch( key, val, MATCH_ANY );
-  }
 
-  private final Object putIfMatch( long key, Object newVal, Object oldVal ) {
-    assert newVal != null;
-    assert oldVal != null;
+  private final TypeV putIfMatch( long key, Object newVal, Object oldVal ) {
+    if (oldVal == null || newVal == null)  throw new NullPointerException();
     if( key == NO_KEY ) {
       final Object curVal = _val_1;
       if( oldVal == NO_MATCH_OLD || // Do we care about expected-Value at all?
@@ -186,12 +179,12 @@ public class NonBlockingHashMapLong<TypeV>
           (oldVal == MATCH_ANY && curVal != TOMBSTONE) ||
           oldVal.equals(curVal) )   // Expensive equals check
         CAS(_val_1_offset,curVal,newVal); // One shot CAS update attempt
-      return curVal == TOMBSTONE ? null : curVal; // Return the last value present
+      return curVal == TOMBSTONE ? null : (TypeV)curVal; // Return the last value present
     }
     final Object res = _chm.putIfMatch( key, newVal, oldVal );
     assert !(res instanceof Prime);
     assert res != null;
-    return res == TOMBSTONE ? null : res;
+    return res == TOMBSTONE ? null : (TypeV)res;
   }
 
   // Atomically replace the CHM with a new empty CHM
@@ -228,11 +221,13 @@ public class NonBlockingHashMapLong<TypeV>
   public TypeV   get    ( Object key              ) { return (key instanceof Long) ? get    (((Long)key).longValue()) : null;  }
   public TypeV   remove ( Object key              ) { return (key instanceof Long) ? remove (((Long)key).longValue()) : null;  }
   public boolean remove ( Object key, Object Val  ) { return (key instanceof Long) ? remove (((Long)key).longValue(), Val) : false;  }
-  public TypeV   replace( Long key, TypeV Val     ) { return (key instanceof Long) ? replace(((Long)key).longValue(), Val) : null;  }
-  public boolean replace( Long key, TypeV oldValue, TypeV newValue ) { return (key instanceof Long) ? replace(((Long)key).longValue(), oldValue, newValue) : false;  }
-  public TypeV   putIfAbsent( Long key, TypeV val ) { return (key instanceof Long) ? (TypeV)putIfMatch( ((Long)key).longValue(),  val, null ) : null;  }
   public boolean containsKey( Object key          ) { return (key instanceof Long) ? containsKey(((Long)key).longValue()) : false; }
-  public TypeV put( Long key, TypeV val ) { return put(key.longValue(),val); }
+  public TypeV   putIfAbsent( Long key, TypeV val ) { return putIfAbsent( ((Long)key).longValue(), val ); }
+  public TypeV   replace( Long key, TypeV Val     ) { return replace(((Long)key).longValue(), Val);  }
+  public TypeV   put    ( Long key, TypeV val     ) { return put(key.longValue(),val); }
+  public boolean replace( Long key, TypeV oldValue, TypeV newValue ) { 
+    return replace(((Long)key).longValue(), oldValue, newValue);   
+  }
 
   // --- help_copy -----------------------------------------------------------
   // Help along an existing resize operation.  This is just a fast cut-out
