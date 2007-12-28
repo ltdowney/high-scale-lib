@@ -52,7 +52,7 @@ public class NonBlockingSetInt extends AbstractSet<Integer> implements Serializa
   private transient NBSI _nbsi;
 
   public NonBlockingSetInt( ) { 
-    _nbsi = new NBSI(63, new ConcurrentAutoTable(), this); // The initial 1-word set
+    _nbsi = new NBSI(63, new Counter(), this); // The initial 1-word set
   }
     
   // Lower-case 'int' versions - no autoboxing, very fast.
@@ -65,7 +65,7 @@ public class NonBlockingSetInt extends AbstractSet<Integer> implements Serializa
   public boolean contains( final int i ) { return i<0 ? false : _nbsi.contains(i); }
   public int     size    (             ) { return _nbsi.size( );                   }
   public void    clear   (             ) { 
-    NBSI cleared = new NBSI(63, new ConcurrentAutoTable(), this); // An empty initial NBSI
+    NBSI cleared = new NBSI(63, new Counter(), this); // An empty initial NBSI
     while( !CAS_nbsi( _nbsi, cleared ) ) // Spin until clear works
       ;
   }
@@ -133,7 +133,7 @@ public class NonBlockingSetInt extends AbstractSet<Integer> implements Serializa
   private void readObject(java.io.ObjectInputStream s) throws IOException, ClassNotFoundException  {
     s.defaultReadObject();      // Read nothing
     final int len = s.readInt(); // Read max element
-    _nbsi = new NBSI(len, new ConcurrentAutoTable(), this);
+    _nbsi = new NBSI(len, new Counter(), this);
     for( int i=0; i<len; i++ )  // Read all bits
       if( s.readBoolean() )
         _nbsi.add(i);
@@ -145,7 +145,7 @@ public class NonBlockingSetInt extends AbstractSet<Integer> implements Serializa
     private transient final NonBlockingSetInt _non_blocking_set_int;
 
     // Used to count elements: a high-performance counter.
-    private transient final ConcurrentAutoTable _size;
+    private transient final Counter _size;
 
     // The Bits
     private final long _bits[];
@@ -192,12 +192,12 @@ public class NonBlockingSetInt extends AbstractSet<Integer> implements Serializa
     // are all set, we shift them off and recursively operate on the _nbsi64 set.
     private final NBSI _nbsi64;
     
-    private NBSI( int max_elem, ConcurrentAutoTable cat, NonBlockingSetInt nonb ) { 
+    private NBSI( int max_elem, Counter ctr, NonBlockingSetInt nonb ) { 
       super(); 
       _non_blocking_set_int = nonb;
-      _size = cat;
-      _copyIdx  = cat == null ? null : new AtomicInteger();
-      _copyDone = cat == null ? null : new AtomicInteger();
+      _size = ctr;
+      _copyIdx  = ctr == null ? null : new AtomicInteger();
+      _copyDone = ctr == null ? null : new AtomicInteger();
       // The main array of bits
       _bits = new long[(int)(((long)max_elem+63)>>>6)];
       // Every 64th bit is moved off to it's own subarray, so that the
@@ -282,7 +282,7 @@ public class NonBlockingSetInt extends AbstractSet<Integer> implements Serializa
       return (old & mask) != 0; 
     }
     
-    public int size() { return (int)_size.sum(); }
+    public int size() { return (int)_size.get(); }
 
     // Must grow the current array to hold an element of size i
     private NBSI install_larger_new_bits( final int i ) {

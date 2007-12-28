@@ -140,8 +140,8 @@ public class Harness extends Thread {
 
     if( C instanceof CATCounter ) {
       CATCounter cat = (CATCounter)C;
-      System.out.print(" autotable="+cat.internal_size());
-      if( loss != 0 ) cat.print();
+      System.out.print(" autotable="); 
+      cat.print();
     }
 
     System.out.println();

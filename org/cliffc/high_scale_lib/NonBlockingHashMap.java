@@ -161,8 +161,8 @@ public class NonBlockingHashMap<TypeK, TypeV>
   }
 
   // Count of reprobes
-  private transient ConcurrentAutoTable _reprobes = new ConcurrentAutoTable();
-  public long reprobes() { long r = _reprobes.sum(); _reprobes = new ConcurrentAutoTable(); return r; }
+  private transient Counter _reprobes = new Counter();
+  public long reprobes() { long r = _reprobes.get(); _reprobes = new Counter(); return r; }
 
 
   // --- reprobe_limit -----------------------------------------------------
@@ -184,7 +184,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
     for( i=MIN_SIZE_LOG; (1<<i) < initial_sz; i++ ) ;
     // Double size for K,V pairs, add 1 for CHM and 1 for hashes
     _kvs = new Object[((1<<i)<<1)+2];
-    _kvs[0] = new CHM(new ConcurrentAutoTable()); // CHM in slot 0
+    _kvs[0] = new CHM(new Counter()); // CHM in slot 0
     _kvs[1] = new int[1<<i];                      // Matching hash entries
     _last_resize_milli = System.currentTimeMillis();
   }
@@ -477,8 +477,8 @@ public class NonBlockingHashMap<TypeK, TypeV>
   // The control structure for the NonBlockingHashMap
   private static final class CHM<TypeK,TypeV> {
     // Size in active K,V pairs
-    private final ConcurrentAutoTable _size;
-    public int size () { return (int)_size.sum(); }
+    private final Counter _size;
+    public int size () { return (int)_size.get(); }
 
     // ---
     // These next 2 fields are used in the resizing heuristics, to judge when
@@ -490,8 +490,8 @@ public class NonBlockingHashMap<TypeK, TypeV>
     // keys) then we need a larger table to cut down on the churn.
 
     // Count of used slots, to tell when table is full of dead unusable slots
-    private final ConcurrentAutoTable _slots;
-    public int slots() { return (int)_slots.sum(); }
+    private final Counter _slots;
+    public int slots() { return (int)_slots.get(); }
     
     // ---
     // New mappings, used during resizing.
@@ -528,9 +528,9 @@ public class NonBlockingHashMap<TypeK, TypeV>
 
     // ---
     // Simple constructor
-    CHM( ConcurrentAutoTable size ) {
+    CHM( Counter size ) {
       _size = size;
-      _slots= new ConcurrentAutoTable();
+      _slots= new Counter();
     }
 
     // --- tableFull ---------------------------------------------------------
@@ -547,7 +547,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
         // Do the cheap check first: we allow some number of reprobes always
         reprobe_cnt >= REPROBE_LIMIT &&
         // More expensive check: see if the table is > 1/4 full.
-        _slots.estimate_sum() >= reprobe_limit(len);
+        _slots.estimate_get() >= reprobe_limit(len);
     }
 
     // --- resize ------------------------------------------------------------
@@ -587,7 +587,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
       long q=0;
       if( newsz <= oldlen &&    // New table would shrink or hold steady?
           tm <= topmap._last_resize_milli+10000 && // Recent resize (less than 1 sec ago)
-          (q=_slots.estimate_sum()) >= (sz<<1) ) // 1/2 of keys are dead?
+          (q=_slots.estimate_get()) >= (sz<<1) ) // 1/2 of keys are dead?
         newsz = oldlen<<1;      // Double the existing size
 
       // Do not shrink, ever

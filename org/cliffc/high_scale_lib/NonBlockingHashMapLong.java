@@ -124,9 +124,9 @@ public class NonBlockingHashMapLong<TypeV>
   }
 
   // Count of reprobes
-  //private transient ConcurrentAutoTable _reprobes = new ConcurrentAutoTable();
-  //public long reprobes() { long r = _reprobes.sum(); _reprobes = new ConcurrentAutoTable(); return r; }
-  public long reprobes() { return 0; /*reprobe tracking currently turned off*/ }
+  private transient Counter _reprobes = new Counter();
+  public long reprobes() { long r = _reprobes.get(); _reprobes = new Counter(); return r; }
+  //public long reprobes() { return 0; /*reprobe tracking currently turned off*/ }
 
 
   // --- reprobe_limit -----------------------------------------------------
@@ -151,7 +151,7 @@ public class NonBlockingHashMapLong<TypeV>
     if( initial_sz < 0 ) throw new IllegalArgumentException();
     int i;                      // Convert to next largest power-of-2
     for( i=MIN_SIZE_LOG; (1<<i) < initial_sz; i++ ) ;
-    _chm = new CHM(this,new ConcurrentAutoTable(),i);
+    _chm = new CHM(this,new Counter(),i);
     _val_1 = TOMBSTONE;         // Always as-if deleted
     _last_resize_milli = System.currentTimeMillis();
   }
@@ -189,7 +189,7 @@ public class NonBlockingHashMapLong<TypeV>
 
   // Atomically replace the CHM with a new empty CHM
   public void clear() {         // Smack a new empty table down
-    CHM newchm = new CHM(this,new ConcurrentAutoTable(),MIN_SIZE_LOG);
+    CHM newchm = new CHM(this,new Counter(),MIN_SIZE_LOG);
     while( !CAS(_chm_offset,_chm,newchm) ) // Spin until the clear works
       ;
     CAS(_val_1_offset,_val_1,TOMBSTONE);
@@ -251,8 +251,8 @@ public class NonBlockingHashMapLong<TypeV>
     final NonBlockingHashMapLong _nbhml;
 
     // Size in active K,V pairs
-    private final ConcurrentAutoTable _size;
-    public int size () { return (int)_size.sum(); }
+    private final Counter _size;
+    public int size () { return (int)_size.get(); }
 
     // ---
     // These next 2 fields are used in the resizing heuristics, to judge when
@@ -264,8 +264,8 @@ public class NonBlockingHashMapLong<TypeV>
     // keys) then we need a larger table to cut down on the churn.
 
     // Count of used slots, to tell when table is full of dead unusable slots
-    private final ConcurrentAutoTable _slots;
-    public int slots() { return (int)_slots.sum(); }
+    private final Counter _slots;
+    public int slots() { return (int)_slots.get(); }
     
     // ---
     // New mappings, used during resizing.
@@ -310,10 +310,10 @@ public class NonBlockingHashMapLong<TypeV>
     final Object [] _vals;
    
     // Simple constructor
-    CHM( final NonBlockingHashMapLong nbhml, ConcurrentAutoTable size, final int logsize ) {
+    CHM( final NonBlockingHashMapLong nbhml, Counter size, final int logsize ) {
       _nbhml = nbhml;
       _size = size;
-      _slots= new ConcurrentAutoTable();
+      _slots= new Counter();
       _keys = new long  [1<<logsize];
       _vals = new Object[1<<logsize];
     }
@@ -522,7 +522,7 @@ public class NonBlockingHashMapLong<TypeV>
         // Do the cheap check first: we allow some number of reprobes always
         reprobe_cnt >= REPROBE_LIMIT &&
         // More expensive check: see if the table is > 1/4 full.
-        _slots.estimate_sum() >= reprobe_limit(len);
+        _slots.estimate_get() >= reprobe_limit(len);
     }
 
     // --- resize ------------------------------------------------------------
