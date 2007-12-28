@@ -52,6 +52,7 @@ public class ConcurrentAutoTable implements Serializable {
   
   // A more verbose print, showing internal structure
   public void print() { _cat.print(); }
+  public int internal_size() { return _cat._t.length; }
 
   // Only add 'x' to some slot in table, hinted at by 'hash', if bits under
   // the mask are all zero.  The sum can overflow or 'x' can contain bits in
