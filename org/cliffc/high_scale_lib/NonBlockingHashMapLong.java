@@ -12,6 +12,68 @@ import java.util.concurrent.atomic.*;
 import sun.misc.Unsafe;
 import java.lang.reflect.*;
 
+/**
+ * A lock-free alternate implementation of {@link java.util.ConcurrentHashMap}
+ * with <strong>primitive long keys</strong>, better scaling properties and
+ * generally lower costs.  The use of {@code long} keys allows for faster
+ * compares and lower memory costs.  The Map provides identical correctness
+ * properties as ConcurrentHashMap.  All operations are non-blocking and
+ * multi-thread safe, including all update operations.  {@link
+ * NonBlockingHashMapLong} scales substatially better than {@link
+ * java.util.ConcurrentHashMap} for high update rates, even with a large
+ * concurrency factor.  Scaling is linear up to 768 CPUs on a 768-CPU Azul
+ * box, even with 100% updates or 100% reads or any fraction in-between.
+ * Linear scaling up to all cpus has been observed on a 32-way Sun US2 box,
+ * 32-way Sun Niagra box, 8-way Intel box and a 4-way Power box.
+ *
+ * <p><strong>The main benefit of this class</strong> over using plain {@link
+ * NonBlockingHashMap} with {@link Long} keys is that it avoids the
+ * auto-boxing and unboxing costs.  Since auto-boxing is <em>automatic</em>,
+ * it is easy to accidentally cause auto-boxing and negate the space and speed
+ * benefits.
+ * 
+ * <p>This class obeys the same functional specification as {@link
+ * java.util.Hashtable}, and includes versions of methods corresponding to
+ * each method of <tt>Hashtable</tt>.  However, even though all operations are
+ * thread-safe, operations do <em>not</em> entail locking and there is
+ * <em>not</em> any support for locking the entire table in a way that
+ * prevents all access.  This class is fully interoperable with
+ * <tt>Hashtable</tt> in programs that rely on its thread safety but not on
+ * its synchronization details.
+ *
+ * <p> Operations (including <tt>put</tt>) generally do not block, so may
+ * overlap with other update operations (including other <tt>puts</tt> and
+ * <tt>removes</tt>).  Retrievals reflect the results of the most recently
+ * <em>completed</em> update operations holding upon their onset.  For
+ * aggregate operations such as <tt>putAll</tt>, concurrent retrievals may
+ * reflect insertion or removal of only some entries.  Similarly, Iterators
+ * and Enumerations return elements reflecting the state of the hash table at
+ * some point at or since the creation of the iterator/enumeration.  They do
+ * <em>not</em> throw {@link ConcurrentModificationException}.  However,
+ * iterators are designed to be used by only one thread at a time.
+ *
+ * <p> Very full tables, or tables with high reprobe rates may trigger an
+ * internal resize operation to move into a larger table.  Resizing is not
+ * terribly expensive, but it is not free either; during resize operations
+ * table throughput may drop somewhat.  All threads that visit the table
+ * during a resize will 'help' the resizing but will still be allowed to
+ * complete their operation before the resize is finished (i.e., a simple
+ * 'get' operation on a million-entry table undergoing resizing will not need
+ * to block until the entire million entries are copied).
+ *
+ * <p>This class and its views and iterators implement all of the
+ * <em>optional</em> methods of the {@link Map} and {@link Iterator}
+ * interfaces.
+ *
+ * <p> Like {@link Hashtable} but unlike {@link HashMap}, this class
+ * does <em>not</em> allow <tt>null</tt> to be used as a value.
+ *
+ *
+ * @since 1.5
+ * @author Cliff Click
+ * @param <TypeV> the type of mapped values
+ */
+
 public class NonBlockingHashMapLong<TypeV> 
   extends AbstractMap<Long,TypeV> 
   implements ConcurrentMap<Long,TypeV>, Serializable {
@@ -53,17 +115,17 @@ public class NonBlockingHashMapLong<TypeV>
   }
 
   // --- Adding a 'prime' bit onto Values via wrapping with a junk wrapper class
-  public static final class Prime {
-    public final Object _V;
+  private static final class Prime {
+    final Object _V;
     Prime( Object V ) { _V = V; }
     static Object unbox( Object V ) { return V instanceof Prime ? ((Prime)V)._V : V;  }
   }
 
   // --- The Hash Table --------------------
-  public transient CHM _chm;
+  private transient CHM _chm;
   // This next field holds the value for Key 0 - the special key value which
   // is the initial array value, and also means: no-key-inserted-yet.
-  public transient Object _val_1; // Value for Key: NO_KEY
+  private transient Object _val_1; // Value for Key: NO_KEY
 
   // Time since last resize
   private transient long _last_resize_milli;
@@ -80,18 +142,18 @@ public class NonBlockingHashMapLong<TypeV>
   // --- Sentinels -------------------------
   // No-Match-Old - putIfMatch does updates only if it matches the old value,
   // and NO_MATCH_OLD basically counts as a wildcard match.
-  public static final Object NO_MATCH_OLD = new Object(); // Sentinel
+  private static final Object NO_MATCH_OLD = new Object(); // Sentinel
   // Match-Any-not-null - putIfMatch does updates only if it find a real old
   // value.
-  public static final Object MATCH_ANY = new Object(); // Sentinel
+  private static final Object MATCH_ANY = new Object(); // Sentinel
   // This K/V pair has been deleted (but the Key slot is forever claimed).
   // The same Key can be reinserted with a new value later.
-  public static final Object TOMBSTONE = new Object();
+  private static final Object TOMBSTONE = new Object();
   // Prime'd or box'd version of TOMBSTONE.  This K/V pair was deleted, then a
   // table resize started.  The K/V pair has been marked so that no new
   // updates can happen to the old table (and since the K/V pair was deleted
   // nothing was copied to the new table).
-  public static final Prime  TOMBPRIME = new Prime(TOMBSTONE);
+  private static final Prime  TOMBPRIME = new Prime(TOMBSTONE);
 
   // I exclude 1 long from the 2^64 possibilities, and test for it before
   // entering the main array.  The NO_KEY value must be zero, the initial
@@ -99,34 +161,39 @@ public class NonBlockingHashMapLong<TypeV>
   private static final long NO_KEY = 0L;
 
   // --- dump ----------------------------------------------------------------
-  public final void dump() { 
+  /** Verbose printout of table internals, useful for debugging.  */
+  public final void print() { 
     System.out.println("=========");
-    dump_impl(-99,NO_KEY,_val_1);
-    _chm.dump();
+    print_impl(-99,NO_KEY,_val_1);
+    _chm.print();
     System.out.println("=========");
   }
-  private static final void dump_impl(final int i, final long K, final Object V) { 
+  private static final void print_impl(final int i, final long K, final Object V) { 
     String p = (V instanceof Prime) ? "prime_" : "";
     Object V2 = Prime.unbox(V);
     String VS = (V2 == TOMBSTONE) ? "tombstone" : V2.toString();
     System.out.println("["+i+"]=("+K+","+p+VS+")");
   }
     
-  public final void dump2() { 
+  private final void print2() { 
     System.out.println("=========");
-    dump2_impl(-99,NO_KEY,_val_1);
-    _chm.dump();
+    print2_impl(-99,NO_KEY,_val_1);
+    _chm.print();
     System.out.println("=========");
   }
-  private static final void dump2_impl(final int i, final long K, final Object V) { 
+  private static final void print2_impl(final int i, final long K, final Object V) { 
     if( V != null && Prime.unbox(V) != TOMBSTONE )
-      dump_impl(i,K,V);
+      print_impl(i,K,V);
   }
 
   // Count of reprobes
   private transient Counter _reprobes = new Counter();
+  /** Get and clear the current count of reprobes.  Reprobes happen on key
+   *  collisions, and a high reprobe rate may indicate a poor hash function or
+   *  weaknesses in the table resizing function.
+   *  @return the count of reprobes since the last call to {@link #reprobes}
+   *  or since the table was created.   */
   public long reprobes() { long r = _reprobes.get(); _reprobes = new Counter(); return r; }
-  //public long reprobes() { return 0; /*reprobe tracking currently turned off*/ }
 
 
   // --- reprobe_limit -----------------------------------------------------
@@ -140,9 +207,27 @@ public class NonBlockingHashMapLong<TypeV>
 
   // --- NonBlockingHashMapLong ----------------------------------------------
   // Constructors
+  /** Create a new NonBlockingHashMapLong with default minimum size (currently set
+   *  to 8 K/V pairs or roughly 84 bytes on a standard 32-bit JVM). */
   public NonBlockingHashMapLong( ) { this(MIN_SIZE,true); }
+
+  /** Create a new NonBlockingHashMap with initial room for the given number of
+   *  elements, thus avoiding internal resizing operations to reach an
+   *  appropriate size.  Large numbers here when used with a small count of
+   *  elements will sacrifice space for a small amount of time gained.  The
+   *  initial size will be rounded up internally to the next larger power of 2. */
   public NonBlockingHashMapLong( final int initial_sz ) { this(initial_sz,true); }
+
+  /** Create a new NonBlockingHashMapLong, setting the space-for-speed
+   *  tradeoff.  {@code true} optimizes for space and is the default.  {@code
+   *  false} optimizes for speed and doubles space costs for roughly a 10%
+   *  speed improvement.  */
   public NonBlockingHashMapLong( final boolean opt_for_space ) { this(1,opt_for_space); }
+
+  /** Create a new NonBlockingHashMapLong, setting both the initial size and
+   *  the space-for-speed tradeoff.  {@code true} optimizes for space and is
+   *  the default.  {@code false} optimizes for speed and doubles space costs
+   *  for roughly a 10% speed improvement.  */
   public NonBlockingHashMapLong( final int initial_sz, final boolean opt_for_space ) { 
     _opt_for_space = opt_for_space;
     initialize(initial_sz); 
@@ -157,15 +242,61 @@ public class NonBlockingHashMapLong<TypeV>
   }
 
   // --- wrappers ------------------------------------------------------------
+
+  /** Returns the number of key-value mappings in this map.
+   *  @return the number of key-value mappings in this map */
   public int     size       ( )                     { return (_val_1==TOMBSTONE?0:1) + (int)_chm.size(); }
-  public boolean isEmpty    ( )                     { return size()==0; }
+  /** Tests if the key in the table.
+   * @return <tt>true</tt> if the key is in the table */
   public boolean containsKey( long key )            { return get(key) != null; }
+
+  /** Legacy method testing if some key maps into the specified value in this
+   *  table.  This method is identical in functionality to {@link
+   *  #containsValue}, and exists solely to ensure full compatibility with
+   *  class {@link java.util.Hashtable}, which supported this method prior to
+   *  introduction of the Java Collections framework.
+   *  @param  val a value to search for
+   *  @return <tt>true</tt> if this map maps one or more keys to the specified value
+   *  @throws NullPointerException if the specified value is null */
   public boolean contains   ( Object val )          { return containsValue(val); }
+
+  /** Maps the specified key to the specified value in the table.  The value
+   *  cannot be null.  <p> The value can be retrieved by calling {@link #get}
+   *  with a key that is equal to the original key.
+   *  @param key key with which the specified value is to be associated
+   *  @param val value to be associated with the specified key
+   *  @return the previous value associated with <tt>key</tt>, or
+   *          <tt>null</tt> if there was no mapping for <tt>key</tt>
+   *  @throws NullPointerException if the specified value is null  */
   public TypeV   put        ( long key, TypeV val ) { return putIfMatch( key,      val,NO_MATCH_OLD);}
+
+  /** Atomically, do a {@link #put} if-and-only-if the key is not mapped.
+   *  Useful to ensure that only a single mapping for the key exists, even if
+   *  many threads are trying to create the mapping in parallel.
+   *  @return the previous value associated with the specified key,
+   *         or <tt>null</tt> if there was no mapping for the key
+   *  @throws NullPointerException if the specified is value is null  */
   public TypeV   putIfAbsent( long key, TypeV val ) { return putIfMatch( key,      val,TOMBSTONE   );}
+
+  /** Removes the key (and its corresponding value) from this map.
+    * This method does nothing if the key is not in the map.
+    * @return the previous value associated with <tt>key</tt>, or
+    *         <tt>null</tt> if there was no mapping for <tt>key</tt>*/
   public TypeV   remove     ( long key )            { return putIfMatch( key,TOMBSTONE,NO_MATCH_OLD);}
+
+  /** Atomically do a {@link #remove(long)} if-and-only-if the key is mapped
+   *  to a value which is <code>equals</code> to the given value.
+   *  @throws NullPointerException if the specified value is null */
   public boolean remove     ( long key,Object val ) { return putIfMatch( key,TOMBSTONE,val ) == val ;}
+
+  /** Atomically do a <code>put(key,val)</code> if-and-only-if the key is
+   *  mapped to some value already.
+   *  @throws NullPointerException if the specified value is null */
   public TypeV   replace    ( long key, TypeV val ) { return putIfMatch( key,      val,MATCH_ANY   );}
+
+  /** Atomically do a <code>put(key,newValue)</code> if-and-only-if the key is
+   *  mapped a value which is <code>equals</code> to <code>oldValue</code>.
+   *  @throws NullPointerException if the specified value is null */
   public boolean replace    ( long key, TypeV  oldValue, TypeV newValue ) {
     return putIfMatch( key, newValue, oldValue ) == oldValue;
   }
@@ -187,7 +318,7 @@ public class NonBlockingHashMapLong<TypeV>
     return res == TOMBSTONE ? null : (TypeV)res;
   }
 
-  // Atomically replace the CHM with a new empty CHM
+  /** Removes all of the mappings from this map. */
   public void clear() {         // Smack a new empty table down
     CHM newchm = new CHM(this,new Counter(),MIN_SIZE_LOG);
     while( !CAS(_chm_offset,_chm,newchm) ) // Spin until the clear works
@@ -195,6 +326,12 @@ public class NonBlockingHashMapLong<TypeV>
     CAS(_val_1_offset,_val_1,TOMBSTONE);
   }
 
+  /** Returns <tt>true</tt> if this Map maps one or more keys to the specified
+   *  value.  <em>Note</em>: This method requires a full internal traversal of the
+   *  hash table and is much slower than {@link #containsKey}.
+   *  @param val value whose presence in this map is to be tested
+   *  @return <tt>true</tt> if this Map maps one or more keys to the specified value
+   *  @throws NullPointerException if the specified value is null */
   public boolean containsValue( Object val ) { 
     if( val == null ) return false;
     if( val == _val_1 ) return true; // Key 0
@@ -205,7 +342,13 @@ public class NonBlockingHashMapLong<TypeV>
   }
 
   // --- get -----------------------------------------------------------------
-  // Get!  Returns 'null' to mean Tombstone or empty.  
+  /** Returns the value to which the specified key is mapped, or {@code null}
+   *  if this map contains no mapping for the key.
+   *  <p>More formally, if this map contains a mapping from a key {@code k} to
+   *  a value {@code v} such that {@code key==k}, then this method
+   *  returns {@code v}; otherwise it returns {@code null}.  (There can be at
+   *  most one such mapping.)
+   * @throws NullPointerException if the specified key is null */
   // Never returns a Prime nor a Tombstone.
   public final TypeV get( long key ) {
     if( key == NO_KEY ) {
@@ -218,13 +361,21 @@ public class NonBlockingHashMapLong<TypeV>
     return (TypeV)V;
   }
 
+  /** Auto-boxing version of {@link #get(long)}. */
   public TypeV   get    ( Object key              ) { return (key instanceof Long) ? get    (((Long)key).longValue()) : null;  }
+  /** Auto-boxing version of {@link #remove(long)}. */
   public TypeV   remove ( Object key              ) { return (key instanceof Long) ? remove (((Long)key).longValue()) : null;  }
+  /** Auto-boxing version of {@link #remove(long,Object)}. */
   public boolean remove ( Object key, Object Val  ) { return (key instanceof Long) ? remove (((Long)key).longValue(), Val) : false;  }
+  /** Auto-boxing version of {@link #containsKey(long)}. */
   public boolean containsKey( Object key          ) { return (key instanceof Long) ? containsKey(((Long)key).longValue()) : false; }
+  /** Auto-boxing version of {@link #putIfAbsent}. */
   public TypeV   putIfAbsent( Long key, TypeV val ) { return putIfAbsent( ((Long)key).longValue(), val ); }
+  /** Auto-boxing version of {@link #replace}. */
   public TypeV   replace( Long key, TypeV Val     ) { return replace(((Long)key).longValue(), Val);  }
+  /** Auto-boxing version of {@link #put}. */
   public TypeV   put    ( Long key, TypeV val     ) { return put(key.longValue(),val); }
+  /** Auto-boxing version of {@link #replace}. */
   public boolean replace( Long key, TypeV oldValue, TypeV newValue ) { 
     return replace(((Long)key).longValue(), oldValue, newValue);   
   }
@@ -318,31 +469,31 @@ public class NonBlockingHashMapLong<TypeV>
       _vals = new Object[1<<logsize];
     }
 
-    // --- dump innards
-    private final void dump() { 
+    // --- print innards
+    private final void print() { 
       for( int i=0; i<_keys.length; i++ ) {
         long K = _keys[i];
         if( K != NO_KEY )
-          dump_impl(i,K,_vals[i]);
+          print_impl(i,K,_vals[i]);
       }
       CHM newchm = _newchm;     // New table, if any
       if( newchm != null ) {
         System.out.println("----");
-        newchm.dump();
+        newchm.print();
       }
     }
 
-    // --- dump only the live objects
-    private final void dump2( ) { 
+    // --- print only the live objects
+    private final void print2( ) { 
       for( int i=0; i<_keys.length; i++ ) {
         long K = _keys[i];
         if( K != NO_KEY )       // key is sane
-          dump2_impl(i,K,_vals[i]);
+          print2_impl(i,K,_vals[i]);
       }
       CHM newchm = _newchm;     // New table, if any
       if( newchm != null ) {
         System.out.println("----");
-        newchm.dump2();
+        newchm.print2();
       }
     }
 
@@ -816,7 +967,7 @@ public class NonBlockingHashMapLong<TypeV>
     
 
   // --- Snapshot ------------------------------------------------------------
-  class SnapshotV implements Iterator<TypeV> {
+  private class SnapshotV implements Iterator<TypeV>, Enumeration<TypeV> {
     final CHM _sschm;
     public SnapshotV() { 
       CHM topchm;
@@ -872,9 +1023,29 @@ public class NonBlockingHashMapLong<TypeV>
       _sschm.putIfMatch( _prevK, TOMBSTONE, _prevV );
       _prevV = null;
     }
+    public TypeV nextElement() { return next(); }
+    public boolean hasMoreElements() { return hasNext(); }
   }
 
+  /** Returns an enumeration of the values in this table.
+   *  @return an enumeration of the values in this table
+   *  @see #values()  */
+  public Enumeration<TypeV> elements() { return new SnapshotV(); }
+
   // --- values --------------------------------------------------------------
+  /** Returns a {@link Collection} view of the values contained in this map.
+   *  The collection is backed by the map, so changes to the map are reflected
+   *  in the collection, and vice-versa.  The collection supports element
+   *  removal, which removes the corresponding mapping from this map, via the
+   *  <tt>Iterator.remove</tt>, <tt>Collection.remove</tt>,
+   *  <tt>removeAll</tt>, <tt>retainAll</tt>, and <tt>clear</tt> operations.
+   *  It does not support the <tt>add</tt> or <tt>addAll</tt> operations.
+   *
+   *  <p>The view's <tt>iterator</tt> is a "weakly consistent" iterator that
+   *  will never throw {@link ConcurrentModificationException}, and guarantees
+   *  to traverse elements as they existed upon construction of the iterator,
+   *  and may (but is not guaranteed to) reflect any modifications subsequent
+   *  to construction. */
   public Collection<TypeV> values() {
     return new AbstractCollection<TypeV>() {
       public void    clear   (          ) {        NonBlockingHashMapLong.this.clear   ( ); }
@@ -885,14 +1056,46 @@ public class NonBlockingHashMapLong<TypeV>
   }
 
   // --- keySet --------------------------------------------------------------
-  class IteratorLong implements Iterator<Long> {
-    final SnapshotV _ss;
+  /** A class which implements the {@link Iterator} and {@link Enumeration}
+   *  interfaces, generified to the {@link Long} class and supporting a
+   *  <strong>non-auto-boxing</strong> {@link #nextLong} function.  */
+  public class IteratorLong implements Iterator<Long>, Enumeration<Long> {
+    private final SnapshotV _ss;
+    /** A new IteratorLong */
     public IteratorLong() { _ss = new SnapshotV(); }
+    /** Remove last key returned by {@link #next} or {@link #nextLong}. */
     public void remove() { _ss.remove(); }
+    /** <strong>Auto-box</strong> and return the next key. */
     public Long next    () { _ss.next(); return _ss._prevK; }
+    /** Return the next key as a primitive {@code long}. */
     public long nextLong() { _ss.next(); return _ss._prevK; }
+    /** True if there are more keys to iterate over. */
     public boolean hasNext() { return _ss.hasNext(); }
+    /** <strong>Auto-box</strong> and return the next key. */
+    public Long nextElement() { return next(); }
+    /** True if there are more keys to iterate over. */
+    public boolean hasMoreElements() { return hasNext(); }
   }
+  /** Returns an enumeration of the <strong>auto-boxed</strong> keys in this table.
+   *  <strong>Warning:</strong> this version will auto-box all returned keys.
+   *  @return an enumeration of the auto-boxed keys in this table
+   *  @see #keySet()  */
+  public Enumeration<Long> keys() { return new IteratorLong(); }
+
+  /** Returns a {@link Set} view of the keys contained in this map; with care
+   *  the keys may be iterated over <strong>without auto-boxing</strong>.  The
+   *  set is backed by the map, so changes to the map are reflected in the
+   *  set, and vice-versa.  The set supports element removal, which removes
+   *  the corresponding mapping from this map, via the
+   *  <tt>Iterator.remove</tt>, <tt>Set.remove</tt>, <tt>removeAll</tt>,
+   *  <tt>retainAll</tt>, and <tt>clear</tt> operations.  It does not support
+   *  the <tt>add</tt> or <tt>addAll</tt> operations.
+   *  
+   *  <p>The view's <tt>iterator</tt> is a "weakly consistent" iterator that
+   *  will never throw {@link ConcurrentModificationException}, and guarantees
+   *  to traverse elements as they existed upon construction of the iterator,
+   *  and may (but is not guaranteed to) reflect any modifications subsequent
+   *  to construction.  */
   public Set<Long> keySet() {
     return new AbstractSet<Long> () {
       public void    clear   (          ) {        NonBlockingHashMapLong.this.clear   ( ); }
@@ -906,8 +1109,8 @@ public class NonBlockingHashMapLong<TypeV>
 
   // --- entrySet ------------------------------------------------------------
   // Warning: Each call to 'next' in this iterator constructs a new Long and a
-  // new WriteThroughEntry.
-  class NBHMLEntry extends AbstractEntry<Long,TypeV> {
+  // new NBHMLEntry.
+  private class NBHMLEntry extends AbstractEntry<Long,TypeV> {
     NBHMLEntry( final Long k, final TypeV v ) { super(k,v); }
     public TypeV setValue(final TypeV val) {
       if (val == null) throw new NullPointerException();
@@ -915,13 +1118,36 @@ public class NonBlockingHashMapLong<TypeV>
       return put(_key, val);
     }
   }
-  class SnapshotE implements Iterator<Map.Entry<Long,TypeV>> {
+  private class SnapshotE implements Iterator<Map.Entry<Long,TypeV>> {
     final SnapshotV _ss;
     public SnapshotE() { _ss = new SnapshotV(); }
     public void remove() { _ss.remove(); }
     public Map.Entry<Long,TypeV> next() { _ss.next(); return new NBHMLEntry(_ss._prevK,_ss._prevV); }
     public boolean hasNext() { return _ss.hasNext(); }
   }
+
+  /** Returns a {@link Set} view of the mappings contained in this map.  The
+   *  set is backed by the map, so changes to the map are reflected in the
+   *  set, and vice-versa.  The set supports element removal, which removes
+   *  the corresponding mapping from the map, via the
+   *  <tt>Iterator.remove</tt>, <tt>Set.remove</tt>, <tt>removeAll</tt>,
+   *  <tt>retainAll</tt>, and <tt>clear</tt> operations.  It does not support
+   *  the <tt>add</tt> or <tt>addAll</tt> operations.
+   *
+   *  <p>The view's <tt>iterator</tt> is a "weakly consistent" iterator
+   *  that will never throw {@link ConcurrentModificationException},
+   *  and guarantees to traverse elements as they existed upon
+   *  construction of the iterator, and may (but is not guaranteed to)
+   *  reflect any modifications subsequent to construction.  
+   *  
+   *  <p><strong>Warning:</strong> the iterator associated with this Set
+   *  requires the creation of {@link java.util.Map.Entry} objects with each
+   *  iteration.  The {@link NonBlockingHashMap} does not normally create or
+   *  using {@link java.util.Map.Entry} objects so they will be created soley
+   *  to support this iteration.  Iterating using {@link #keySet} or {@link
+   *  #values} will be more efficient.  In addition, this version requires
+   *  <strong>auto-boxing</strong> the keys.
+   */
   public Set<Map.Entry<Long,TypeV>> entrySet() {
     return new AbstractSet<Map.Entry<Long,TypeV>>() {
       public void    clear   (          ) {        NonBlockingHashMapLong.this.clear( ); }

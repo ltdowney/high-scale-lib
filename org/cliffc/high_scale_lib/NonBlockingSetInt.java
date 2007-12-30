@@ -10,23 +10,31 @@ import java.lang.reflect.*;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
-
-// A Non-Blocking Set of primitive 'int'.
-// Requires: maximum element on construction
-
-// General note of caution: The Set API allows the use of 'Integer' with
-// silent autoboxing - which can be very expensive if many calls are being
-// made.  Since autoboxing is silent you may not be aware that this is going
-// on.  The built-in API takes lower-case ints and is more efficient.
-
-// Space: space is used in proportion to the largest element, as opposed to
-// the number of elements (as is the case with hash-table based Set
-// implementations).  Space is approximately (largest_element/8 + 64) bytes.
-
-// The implementation is a simple bit-vector using CAS for update.
-import java.util.concurrent.*;
-import java.util.concurrent.atomic.*;
 import sun.misc.Unsafe;
+
+/**
+ * A multi-threaded bit-vector set, implemented as an array of primitive
+ * {@code longs}.  All operations are non-blocking and multi-threaded safe.
+ * {@link #contains(int)} calls are roughly the same speed as a {load, mask}
+ * sequence.  {@link #add(int)} and {@link #remove(int)} calls are a tad more
+ * expensive than a {load, mask, store} sequence because they must use a CAS.
+ * The bit-vector is auto-sizing.
+ *
+ * <p><em>General note of caution:</em> The Set API allows the use of {@link Integer}
+ * with silent autoboxing - which can be very expensive if many calls are
+ * being made.  Since autoboxing is silent you may not be aware that this is
+ * going on.  The built-in API takes lower-case {@code ints} and is much more
+ * efficient.
+ *
+ * <p>Space: space is used in proportion to the largest element, as opposed to
+ * the number of elements (as is the case with hash-table based Set
+ * implementations).  Space is approximately (largest_element/8 + 64) bytes.
+ *
+ * The implementation is a simple bit-vector using CAS for update.
+ *
+ * @since 1.5
+ * @author Cliff Click
+ */
 
 public class NonBlockingSetInt extends AbstractSet<Integer> implements Serializable {
   private static final long serialVersionUID = 1234123412341234123L;
@@ -51,40 +59,89 @@ public class NonBlockingSetInt extends AbstractSet<Integer> implements Serializa
   // set implementation with a single CAS.
   private transient NBSI _nbsi;
 
+  /** Create a new empty bit-vector */
   public NonBlockingSetInt( ) { 
     _nbsi = new NBSI(63, new Counter(), this); // The initial 1-word set
   }
-    
-  // Lower-case 'int' versions - no autoboxing, very fast.
-  // Negative values are not allowed.
+
+  /** 
+   * Add {@code i} to the set.  Uppercase {@link Integer} version of add,
+   * requires auto-unboxing.  When possible use the {@code int} version of
+   * {@link #add(int)} for efficiency.
+   * @throws IllegalArgumentException if i is negative.
+   * @return <tt>true</tt> if i was added to the set.
+   */
+  public boolean add ( final Integer i ) { 
+    return add(i.intValue()); 
+  }
+  /** 
+   * Test if {@code o} is in the set.  This is the uppercase {@link Integer}
+   * version of contains, requires a type-check and auto-unboxing.  When
+   * possible use the {@code int} version of {@link #contains(int)} for
+   * efficiency.
+   * @return <tt>true</tt> if i was in the set.
+   */
+  public boolean contains( final Object  o ) { 
+    return o instanceof Integer ? contains(((Integer)o).intValue()) : false; 
+  }
+  /** 
+   * Remove {@code o} from the set.  This is the uppercase {@link Integer}
+   * version of remove, requires a type-check and auto-unboxing.  When
+   * possible use the {@code int} version of {@link #remove(int)} for
+   * efficiency.
+   * @return <tt>true</tt> if i was removed to the set.
+   */
+  public boolean remove( final Object  o ) { 
+    return o instanceof Integer ? remove  (((Integer)o).intValue()) : false; 
+  }
+
+  /** 
+   * Add {@code i} to the set.  This is the lower-case '{@code int}' version
+   * of {@link #add} - no autoboxing.  Negative values throw
+   * IllegalArgumentException.
+   * @throws IllegalArgumentException if i is negative.
+   * @return <tt>true</tt> if i was added to the set.
+   */
   public boolean add( final int i ) {
     if( i < 0 ) throw new IllegalArgumentException(""+i);
     return _nbsi.add(i);
   }
-  public boolean remove  ( final int i ) { return i<0 ? false : _nbsi.remove  (i); }
+  /** 
+   * Test if {@code i} is in the set.  This is the lower-case '{@code int}'
+   * version of {@link #contains} - no autoboxing.
+   * @return <tt>true</tt> if i was int the set.
+   */
   public boolean contains( final int i ) { return i<0 ? false : _nbsi.contains(i); }
+  /** 
+   * Remove {@code i} from the set.  This is the fast lower-case '{@code int}'
+   * version of {@link #remove} - no autoboxing.
+   * @return <tt>true</tt> if i was added to the set.
+   */
+  public boolean remove  ( final int i ) { return i<0 ? false : _nbsi.remove  (i); }
+  
+  /** 
+   * Current count of elements in the set.  Due to concurrent racing updates,
+   * the size is only ever approximate.  Updates due to the calling thread are
+   * immediately visible to calling thread.
+   * @return count of elements.
+   */
   public int     size    (             ) { return _nbsi.size( );                   }
+  /** Empty the bitvector. */
   public void    clear   (             ) { 
     NBSI cleared = new NBSI(63, new Counter(), this); // An empty initial NBSI
     while( !CAS_nbsi( _nbsi, cleared ) ) // Spin until clear works
       ;
   }
-  public void dump() { _nbsi.dump(0); }
 
-  // Versions compatible with 'Integer' and AbstractSet
-  public boolean add ( final Integer o ) { 
-    return add(o.intValue()); 
-  }
-  public boolean contains( final Object  o ) { 
-    return o instanceof Integer ? contains(((Integer)o).intValue()) : false; 
-  }
-  public boolean remove( final Object  o ) { 
-    return o instanceof Integer ? remove  (((Integer)o).intValue()) : false; 
-  }
+  /** Verbose printout of internal structure for debugging. */
+  public void print() { _nbsi.print(0); }
 
-  // Standard Java iterator.  Not terribly efficient.
+  /**
+   * Standard Java {@link Iterator}.  Not very efficient because it
+   * auto-boxes the returned values.
+   */
   public Iterator<Integer> iterator( ) { return new iter(); }
-  
+
   private class iter implements Iterator<Integer> {
     NBSI _nbsi2;
     int _idx  = -1;
@@ -392,7 +449,7 @@ public class NonBlockingSetInt extends AbstractSet<Integer> implements Serializa
       System.out.println(msg);
     }
 
-    private void dump(int d) {
+    private void print(int d) {
       StringBuffer buf = new StringBuffer();
       buf.append("NBSI - _bits.len=");
       NBSI x = this;
@@ -414,7 +471,7 @@ public class NonBlockingSetInt extends AbstractSet<Integer> implements Serializa
         print(d,"_copyIdx="+_copyIdx.get()+" _copyDone="+_copyDone.get()+" _words_to_cpy="+_sum_bits_length);
       if( _new != null ) {
         print(d,"__has_new - ");
-        _new.dump(d+1);
+        _new.print(d+1);
       }
     }
   }    

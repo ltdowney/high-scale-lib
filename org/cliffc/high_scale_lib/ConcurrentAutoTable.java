@@ -8,50 +8,81 @@ import java.io.Serializable;
 import java.util.concurrent.atomic.*;
 import sun.misc.Unsafe;
 
-// An auto-resizing table of values.  Updates are done with CAS's to no
-// particular table element.  The intent is to support highly scalable
-// counters, r/w locks, and other structures where the updates are
-// associative, loss-free (no-brainer), and otherwise happen at such a high
-// volume that the cache contention for CAS'ing a single word is unacceptable.
+/**
+ * An auto-resizing table of {@code longs}, supporting low-contention CAS
+ * operations.  Updates are done with CAS's to no particular table element.
+ * The intent is to support highly scalable counters, r/w locks, and other
+ * structures where the updates are associative, loss-free (no-brainer), and
+ * otherwise happen at such a high volume that the cache contention for
+ * CAS'ing a single word is unacceptable.
+ *
+ * <p>This API is overkill for simple counters (e.g. no need for the 'mask')
+ * and is untested as an API for making a scalable r/w lock and so is likely
+ * to change!
+ *
+ * @since 1.5
+ * @author Cliff Click
+ */
 
-// This API is overkill for simple counters (no need for the 'mask') and is
-// untested as an API for making a scalable r/w lock and so is likely to
-// change!
 
 public class ConcurrentAutoTable implements Serializable {
 
   // --- public interface ---
 
-  // Add the given value to current counter value.  Concurrent updates will
-  // not be lost, but addAndGet or getAndAdd are not implemented because but
-  // the total counter value is not atomically updated.
+  /**
+   * Add the given value to current counter value.  Concurrent updates will
+   * not be lost, but addAndGet or getAndAdd are not implemented because the
+   * total counter value (i.e., {@link #get}) is not atomically updated.
+   * Updates are striped across an array of counters to avoid cache contention
+   * and has been tested with performance scaling linearly up to 768 CPUs.
+   */
   public void add( long x ) { add_if_mask(  x,0); }
+  /** {@link #add} with -1 */
   public void decrement()   { add_if_mask(-1L,0); }
+  /** {@link #add} with +1 */
   public void increment()   { add_if_mask( 1L,0); }
 
-  // Atomically set to specified value.  Rather more expensive than a simple
-  // store, in order to remain atomic.
+  /** Atomically set the sum of the striped counters to specified value.
+   *  Rather more expensive than a simple store, in order to remain atomic.
+   */
   public void set( long x ) { 
     CAT newcat = new CAT(null,4,x);
     // Spin until CAS works
     while( !CAS_cat(_cat,newcat) );
   }
 
-  // Current value of the counter.  Since other threads are updating furiously
-  // the value is only approximate, but it includes all counts made by the
-  // current thread.  Requires a pass over all the striped counters.
+  /**
+   * Current value of the counter.  Since other threads are updating furiously
+   * the value is only approximate, but it includes all counts made by the
+   * current thread.  Requires a pass over the internally striped counters.
+   */
   public long get()       { return      _cat.sum(0); }
+  /** Same as {@link #get}, included for completeness. */
   public int  intValue()  { return (int)_cat.sum(0); }
+  /** Same as {@link #get}, included for completeness. */
   public long longValue() { return      _cat.sum(0); }
 
-  // A cheaper 'get'.  Updated only once/millisecond, but fast as a simple
-  // load instruction when not updating.
+  /**
+   * A cheaper {@link #get}.  Updated only once/millisecond, but as fast as a
+   * simple load instruction when not updating.
+   */
   public long estimate_get( ) { return _cat.estimate_sum(0); }
 
+  /**
+   * Return the counter's {@code long} value converted to a string.
+   */
   public String toString() { return _cat.toString(0); }
   
-  // A more verbose print, showing internal structure
+  /**
+   * A more verbose print than {@link #toString}, showing internal structure.
+   * Useful for debugging.
+   */
   public void print() { _cat.print(); }
+
+  /**
+   * Return the internal counter striping factor.  Useful for diagnosing
+   * performance problems.
+   */
   public int internal_size() { return _cat._t.length; }
 
   // Only add 'x' to some slot in table, hinted at by 'hash', if bits under
@@ -62,13 +93,13 @@ public class ConcurrentAutoTable implements Serializable {
   // zero under the mask for failure.
   private long add_if_mask( long x, long mask ) { return _cat.add_if_mask(x,mask,hash(),this); }
 
-
+  // The underlying array of concurrently updated long counters
   private volatile CAT _cat = new CAT(null,4/*Start Small, Think Big!*/,0L);
   private static final AtomicReferenceFieldUpdater<ConcurrentAutoTable,CAT> _catUpdater =
     AtomicReferenceFieldUpdater.newUpdater(ConcurrentAutoTable.class,CAT.class, "_cat");
-  boolean CAS_cat( CAT oldcat, CAT newcat ) { return _catUpdater.compareAndSet(this,oldcat,newcat); }
+  private boolean CAS_cat( CAT oldcat, CAT newcat ) { return _catUpdater.compareAndSet(this,oldcat,newcat); }
 
-
+  // Hash spreader
   private static final int hash() {
     int h = System.identityHashCode(Thread.currentThread());
     // You would think that System.identityHashCode on the current thread

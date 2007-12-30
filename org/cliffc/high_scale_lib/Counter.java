@@ -5,9 +5,16 @@
 
 package org.cliffc.high_scale_lib;
 
-// A simple high-performance counter.
-// Merely renames the extended class to be more obvious.
-// ConcurrentAutoTable already has a decent API.
+/**
+ * A simple high-performance counter.  Merely renames the extended {@link
+ * org.cliffc.high_scale_lib.ConcurrentAutoTable} class to be more obvious.
+ * {@link org.cliffc.high_scale_lib.ConcurrentAutoTable} already has a decent
+ * counting API.
+ *
+ * @since 1.5
+ * @author Cliff Click
+ */
+
 public class Counter extends ConcurrentAutoTable {
 
   // Add the given value to current counter value.  Concurrent updates will
