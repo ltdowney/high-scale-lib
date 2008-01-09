@@ -69,7 +69,7 @@ import sun.misc.Unsafe;
 
 public class NonBlockingHashMap<TypeK, TypeV> 
   extends AbstractMap<TypeK,TypeV> 
-  implements ConcurrentMap<TypeK, TypeV>, Serializable {
+  implements ConcurrentMap<TypeK, TypeV>, Cloneable, Serializable {
 
   private static final long serialVersionUID = 1234123412341234123L;
 
@@ -248,9 +248,11 @@ public class NonBlockingHashMap<TypeK, TypeV>
    *  elements will sacrifice space for a small amount of time gained.  The
    *  initial size will be rounded up internally to the next larger power of 2. */
   public NonBlockingHashMap( final int initial_sz ) { initialize(initial_sz); }
+  protected final void initialize() { initialize(MIN_SIZE); }
   private final void initialize(int initial_sz ) { 
     if( initial_sz < 0 ) throw new IllegalArgumentException();
     int i;                      // Convert to next largest power-of-2
+    if( initial_sz > 1024*1024 ) initial_sz = 1024*1024;
     for( i=MIN_SIZE_LOG; (1<<i) < initial_sz; i++ ) ;
     // Double size for K,V pairs, add 1 for CHM and 1 for hashes
     _kvs = new Object[((1<<i)<<1)+2];
@@ -354,11 +356,47 @@ public class NonBlockingHashMap<TypeK, TypeV>
    *  @return <tt>true</tt> if this map maps one or more keys to the specified value
    *  @throws NullPointerException if the specified value is null */
   public boolean containsValue( final Object val ) { 
-    if( val == null ) return false;
+    if( val == null ) throw new NullPointerException();
     for( TypeV V : values() )
       if( V == val || V.equals(val) )
         return true;
     return false;
+  }
+
+  // This function is supposed to do something for Hashtable, and the JCK
+  // tests hang until it gets called... by somebody ... for some reason,
+  // any reason....
+  protected void rehash() {
+  }
+
+  /**
+   * Creates a shallow copy of this hashtable. All the structure of the 
+   * hashtable itself is copied, but the keys and values are not cloned. 
+   * This is a relatively expensive operation.
+   *
+   * @return  a clone of the hashtable.
+   */
+  public Object clone() {
+    try { 
+      // Must clone, to get the class right; NBHM might have been
+      // extended so it would be wrong to just make a new NBHM.
+      NonBlockingHashMap<TypeK,TypeV> t = (NonBlockingHashMap<TypeK,TypeV>) super.clone();
+      // But I don't have an atomic clone operation - the underlying _kvs
+      // structure is undergoing rapid change.  If I just clone the _kvs
+      // field, the CHM in _kvs[0] won't be in sync.
+      //
+      // Wipe out the cloned array (it was shallow anyways).
+      t.clear();
+      // Now copy sanely
+      for( TypeK K : keySet() ) {
+        final TypeV V = get(K);  // Do an official 'get'
+        t.put(K,V);
+      }
+      return t;
+    } catch (CloneNotSupportedException e) { 
+      // this shouldn't happen, since we are Cloneable
+      throw new InternalError();
+    }
   }
 
   // --- keyeq ---------------------------------------------------------------
@@ -774,6 +812,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
         //long nano = System.nanoTime();
         //System.out.println(" "+nano+" Resize from "+oldlen+" to "+(1<<log2)+" and had "+(_resizers-1)+" extras" );
         //System.out.print("["+log2);
+        topmap.rehash();        // Call for Hashtable's benefit
       } else                    // CAS failed?
         newkvs = _newkvs;       // Reread new table
       return newkvs;

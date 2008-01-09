@@ -478,4 +478,25 @@ public class NBHM_Tester2 extends TestCase {
     assertEquals("values().iterator() count", itemCount, iteratorCount);
   }
 
+  // This test is a copy of the JCK test Hashtable2027, which is incorrect.
+  // The test requires a particular order of values to appear in the esa
+  // array - but this is not part of the spec.  A different implementation
+  // might put the same values into the array but in a different order.
+  //public void testToArray() {
+  //  NonBlockingHashMap ht = new NonBlockingHashMap();
+  //
+  //  ht.put("Nine", new Integer(9));
+  //  ht.put("Ten", new Integer(10));
+  //  ht.put("Ten1", new Integer(100));
+  //  
+  //  Collection es = ht.values();
+  //  
+  //  Object [] esa = es.toArray();
+  //  
+  //  ht.remove("Ten1");
+  //
+  //  assertEquals( "size check", es.size(), 2 );
+  //  assertEquals( "iterator_order[0]", new Integer( 9), esa[0] );
+  //  assertEquals( "iterator_order[1]", new Integer(10), esa[1] );
+  //}
 }
