@@ -248,7 +248,6 @@ public class NonBlockingHashMap<TypeK, TypeV>
    *  elements will sacrifice space for a small amount of time gained.  The
    *  initial size will be rounded up internally to the next larger power of 2. */
   public NonBlockingHashMap( final int initial_sz ) { initialize(initial_sz); }
-  protected final void initialize() { initialize(MIN_SIZE); }
   private final void initialize(int initial_sz ) { 
     if( initial_sz < 0 ) throw new IllegalArgumentException();
     int i;                      // Convert to next largest power-of-2
@@ -260,6 +259,8 @@ public class NonBlockingHashMap<TypeK, TypeV>
     _kvs[1] = new int[1<<i];                      // Matching hash entries
     _last_resize_milli = System.currentTimeMillis();
   }
+  // Version for subclassed readObject calls, to be called after the defaultReadObject
+  protected final void initialize() { initialize(MIN_SIZE); }
 
   // --- wrappers ------------------------------------------------------------
 
