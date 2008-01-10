@@ -182,10 +182,8 @@ class build {
     // Basic definition of a dependency
     final String _target;
     final Q[] _srcs;            // Array of dependent files
-    final String _exec;
     final char _src_sep;
     // These next fields are filled in lazily, as needed.
-    String _parsed_exec;
     String _flat_src;
     File _dst;                  // Actual OS files
     long _modtime;           // Actual (or effective mod time for '-n' builds)
@@ -194,17 +192,14 @@ class build {
     static final private Q[] NONE = new Q[0];
     Q( String target ) {
       _target = target;
-      _exec = "";               // no exec string
-      _parsed_exec = "";
       _src_sep = ' ';
       _srcs = NONE;
       init();
     }
 
     // --- Constructor for a single dependency
-    Q( String target, Q src, String exec ) {
+    Q( String target, Q src ) {
       _target = target;
-      _exec = exec;
       _src_sep = ' ';
       _srcs = new Q[1];
       _srcs[0] = src;
@@ -212,27 +207,17 @@ class build {
     }
 
     // --- Constructor for a list of source dependencies
-    Q( String target, Q[] srcs, char src_sep, String exec ) {
-      // Fill in the fields
+    Q( String target, Q[] srcs, char src_sep ) {
       _target = target;
-      _exec = exec;
       _src_sep = src_sep;
       _srcs = srcs;
       init();
     }
 
-    private void init() {
+    final private void init() {
       // Basic sanity checking
       if( _target.indexOf('%') != -1 ) 
         throw new IllegalArgumentException("dependency target has a '%': "+_target);
-      for( int i=_exec.indexOf('%'); i!= -1; i = _exec.indexOf('%',i+1) ) {
-        if( false ) {
-        } else if( _exec.startsWith("src",i+1) ) { 
-        } else if( _exec.startsWith("dst",i+1) ) { 
-        } else if( _exec.startsWith("top",i+1) ) { 
-        } else
-          throw new IllegalArgumentException("dependency exec has unknown pattern: "+_exec.substring(i));
-      }
       _flat_src = flat_src(',');
 
       // Install the target/dependency mapping in a flat table
@@ -249,17 +234,6 @@ class build {
       return s;
     }
 
-    // --- parse_exec
-    // The _exec String contains normal text, plus '%src' and '%dst' strings.
-    String parse_exec() {
-      if( _parsed_exec == null )
-        _parsed_exec = _exec
-          .replaceAll("%src",TOP_PATH_SLASH+"/"+flat_src(_src_sep))
-          .replaceAll("%dst",TOP_PATH_SLASH+"/"+_target)
-          .replaceAll("%top",TOP_PATH_SLASH);
-      return _parsed_exec;
-    }
-
     // True if our file modtime is after all source file mod times.
     // Correctly reports "not up to date" if modtime is not yet init'd.
     final long latest() {
@@ -272,9 +246,9 @@ class build {
       return l;
     }
 
-    protected ByteArrayOutputStream do_it( String exec ) {
-      System.out.print(exec);
-      return sys_exec(exec);
+    // The void 'do_it' function, with no output
+    protected ByteArrayOutputStream do_it( ) {
+      return null;
     }
 
     // --- make
@@ -308,17 +282,10 @@ class build {
       }
 
       // Files out of date; must do this build step
-      String exec = parse_exec();
       if( _verbose ) System.out.println(_target+ " <= {"+_flat_src+"}");
-      if( _justprint ) {
-        System.out.println(exec);
-        _modtime = last_src+1;  // Force modtime update
-        return true;
-      }
-      
-      // Actually do the step (make the sys-call)
+      // Actually do the build-step
       try {
-        do_it(exec);
+        do_it();
       } catch( BuildError be ) {
         if( this != _build_c )  // Highly annoying to delete own class file
           _dst.delete();        // Failed; make sure target is deleted (except for build.class)
@@ -327,6 +294,11 @@ class build {
         System.out.println();
       }
 
+      if( _justprint ) {        // No expectation of any change
+        _modtime = last_src+1;  // Force modtime update
+        return true;
+      }
+      
       // Double-check that the source files were not modified by the
       // build-step.  It's a fairly common error if file-names get swapped,
       // etc.  This exception is uncaught, so it aborts everything.  It
@@ -334,13 +306,13 @@ class build {
       // the wrong file.
       for( int i=0; i<_srcs.length; i++ )
         if( _srcs[i]._modtime < _srcs[i]._dst.lastModified() )
-          throw new IllegalArgumentException("Timestamp for source file "+_srcs[i]._target+" apparently advanced by exec'ing "+_exec);
+          throw new IllegalArgumentException("Timestamp for source file "+_srcs[i]._target+" apparently advanced by building "+_target);
 
       // Double-check that this step made progress.  Again, failure here is
       // likely a build-step failure to modify the correct file.
       long x = _dst.lastModified();
       if( _modtime == x )
-        throw new IllegalArgumentException("Timestamp for "+_target+" not changed by exec'ing "+_exec);
+        throw new IllegalArgumentException("Timestamp for "+_target+" not changed by building "+_target);
       
       // For very fast build-steps, the target may be updated to a time equal
       // to the input file times after rounding to the file-system's time
@@ -348,7 +320,7 @@ class build {
       // build step worked, but give the result an apparent time just past the
       // src file times to make later steps more obvious.
       if( x < last_src )
-        throw new IllegalArgumentException("Timestamp of "+_target+" not moved past {"+_flat_src+"} timestamps by exec'ing "+_exec);
+        throw new IllegalArgumentException("Timestamp of "+_target+" not moved past {"+_flat_src+"} timestamps by building ");
       if( x == last_src ) {     // Aaahh, we have 'tied' in the timestamps
         long now = System.currentTimeMillis();
         while( now <= x ) {     // Stall till real-time is in a new milli-second
@@ -364,18 +336,66 @@ class build {
 
   };
 
+  // --- A dependency with an exec string ------------------------------------
+  // Mostly just a normal dependency; it "execs" a String to do the build-step.
+  static private class QS extends Q {
+    final String _exec;
+    String _parsed_exec;
+
+    QS( String target, Q src, String exec ) {
+      super(target,src);
+      _exec = exec;
+      init();
+    }
+
+    // --- Constructor for a list of source dependencies
+    QS( String target, Q[] srcs, char src_sep, String exec ) {
+      super(target,srcs, src_sep);
+      _exec = exec;
+      init();
+    }
+
+    private final void init() {
+      for( int i=_exec.indexOf('%'); i!= -1; i = _exec.indexOf('%',i+1) ) {
+        if( false ) {
+        } else if( _exec.startsWith("src",i+1) ) { 
+        } else if( _exec.startsWith("dst",i+1) ) { 
+        } else if( _exec.startsWith("top",i+1) ) { 
+        } else
+          throw new IllegalArgumentException("dependency exec has unknown pattern: "+_exec.substring(i));
+      }
+    }
+
+    // --- parse_exec
+    // The _exec String contains normal text, plus '%src' and '%dst' strings.
+    String parse_exec() {
+      if( _parsed_exec == null )
+        _parsed_exec = _exec
+          .replaceAll("%src",TOP_PATH_SLASH+"/"+flat_src(_src_sep))
+          .replaceAll("%dst",TOP_PATH_SLASH+"/"+_target)
+          .replaceAll("%top",TOP_PATH_SLASH);
+      return _parsed_exec;
+    }
+
+    protected ByteArrayOutputStream do_it( ) {
+      String exec = parse_exec();
+      System.out.print(exec);
+      return _justprint ? null : sys_exec(exec);
+    }
+  }
+
   // --- A dependency for a JUnit test ---------------------------------------
   // Mostly just a normal dependency, except it writes the testing output
   // to a log file.
-  static private class Q_JUnit extends Q {
+  static private class Q_JUnit extends QS {
     final String _base;
     Q_JUnit( String base, Q clazzfile, String exec ) {
       super(base+".log",clazzfile,exec);
       _base = base;
     }
 
-    protected ByteArrayOutputStream do_it( String exec ) {
-      ByteArrayOutputStream out = super.do_it(exec);
+    protected ByteArrayOutputStream do_it( ) {
+      ByteArrayOutputStream out = super.do_it();
       // If we can 'do_it' with no errors, then dump the output to a base.log file
       try { 
         File f = new File(TOP_PATH_SLASH+"/"+_base+".log");
@@ -392,6 +412,23 @@ class build {
     }
   }
   
+  // --- A dependency, just 'touch'ing the target ----------------------------
+  // Mostly just a normal dependency
+  static private class Q_touch extends Q {
+    Q_touch( String target, Q   src  ) { super(target,src);  }
+    Q_touch( String target, Q[] srcs ) { super(target,srcs, ' '); }
+    protected ByteArrayOutputStream do_it( ) {
+      System.out.print("touch "+_target);
+      if( _justprint ) return null;
+      File f = new File(TOP_PATH_SLASH+"/"+_target);
+      try { f.createNewFile(); }
+      catch( IOException e ) {
+        throw new BuildError("Unable to make file "+_target+": "+e.toString());
+      }
+      return null;              // No output from a 'touch'
+    }
+  }
+
 
 
   // =========================================================================
@@ -405,7 +442,7 @@ class build {
 
   // The build-self dependency every project needs
   static final Q _build_j = new Q("build.java");
-  static final Q _build_c = new Q("build.class",_build_j,"javac %src");
+  static final Q _build_c = new QS("build.class",_build_j,"javac %src");
 
   // The High Scale Lib java files
   static final String HSL = "org/cliffc/high_scale_lib";
@@ -419,47 +456,47 @@ class build {
   static final Q _unsaf_j = new Q(HSL+"/UtilUnsafe.java");
 
   // The High Scale Lib class files
-  static final Q _absen_cls = new Q(HSL+"/AbstractEntry.class"         , _absen_j, javac);
-  static final Q _cat_cls   = new Q(HSL+"/ConcurrentAutoTable.class"   , _cat_j  , javac); 
-  static final Q _cntr_cls  = new Q(HSL+"/Counter.class"               , _cntr_j , javac);              
-  static final Q _nbhm_cls  = new Q(HSL+"/NonBlockingHashMap.class"    , _nbhm_j , javac);
-  static final Q _nbhml_cls = new Q(HSL+"/NonBlockingHashMapLong.class", _nbhml_j, javac);
-  static final Q _nbhs_cls  = new Q(HSL+"/NonBlockingHashSet.class"    , _nbhs_j , javac);
-  static final Q _nbsi_cls  = new Q(HSL+"/NonBlockingSetInt.class"     , _nbsi_j , javac);
-  static final Q _unsaf_cls = new Q(HSL+"/UtilUnsafe.class"            , _unsaf_j, javac);
+  static final Q _absen_cls = new QS(HSL+"/AbstractEntry.class"         , _absen_j, javac);
+  static final Q _cat_cls   = new QS(HSL+"/ConcurrentAutoTable.class"   , _cat_j  , javac); 
+  static final Q _cntr_cls  = new QS(HSL+"/Counter.class"               , _cntr_j , javac);              
+  static final Q _nbhm_cls  = new QS(HSL+"/NonBlockingHashMap.class"    , _nbhm_j , javac);
+  static final Q _nbhml_cls = new QS(HSL+"/NonBlockingHashMapLong.class", _nbhml_j, javac);
+  static final Q _nbhs_cls  = new QS(HSL+"/NonBlockingHashSet.class"    , _nbhs_j , javac);
+  static final Q _nbsi_cls  = new QS(HSL+"/NonBlockingSetInt.class"     , _nbsi_j , javac);
+  static final Q _unsaf_cls = new QS(HSL+"/UtilUnsafe.class"            , _unsaf_j, javac);
 
   // The testing files.  JUnit output is in a corresponding .log file.
   static final String TNBHM = "Testing/NBHM_Tester";
   static final Q _tnbhm_j   = new Q(TNBHM+"/NBHM_Tester2.java");
-  static final Q _tnbhm_cls = new Q(TNBHM+"/NBHM_Tester2.class", _tnbhm_j  , "javac -cp %top:%top/junit-4.4.jar %src");
+  static final Q _tnbhm_cls = new QS(TNBHM+"/NBHM_Tester2.class", _tnbhm_j  , "javac -cp %top:%top/junit-4.4.jar %src");
   static final Q _tnbhm_tst = new Q_JUnit(TNBHM+"/NBHM_Tester2", _tnbhm_cls, "java  -cp %top:%top/junit-4.4.jar:%top/"+TNBHM+" NBHM_Tester2");
   static final Q _tnbhml_j  = new Q(TNBHM+"/NBHML_Tester2.java");
-  static final Q _tnbhml_cls= new Q(TNBHM+"/NBHML_Tester2.class",_tnbhml_j  ,"javac -cp %top:%top/junit-4.4.jar %src");
+  static final Q _tnbhml_cls= new QS(TNBHM+"/NBHML_Tester2.class",_tnbhml_j  ,"javac -cp %top:%top/junit-4.4.jar %src");
   static final Q _tnbhml_tst= new Q_JUnit(TNBHM+"/NBHML_Tester2",_tnbhml_cls,"java  -cp %top:%top/junit-4.4.jar:%top/"+TNBHM+" NBHML_Tester2");
 
   static final String TNBHS = "Testing/NBHS_Tester";
   static final Q _tnbhs_j   = new Q(TNBHS+"/nbhs_tester.java");
-  static final Q _tnbhs_cls = new Q(TNBHS+"/nbhs_tester.class", _tnbhs_j  , "javac -cp %top:%top/junit-4.4.jar %src");
+  static final Q _tnbhs_cls = new QS(TNBHS+"/nbhs_tester.class", _tnbhs_j  , "javac -cp %top:%top/junit-4.4.jar %src");
   static final Q _tnbhs_tst = new Q_JUnit(TNBHS+"/nbhs_tester", _tnbhs_cls, "java  -cp %top:%top/junit-4.4.jar:%top/"+TNBHS+" nbhs_tester");
   static final Q _tnbsi_j   = new Q(TNBHS+"/nbsi_tester.java");
-  static final Q _tnbsi_cls = new Q(TNBHS+"/nbsi_tester.class", _tnbsi_j  , "javac -cp %top:%top/junit-4.4.jar %src");
+  static final Q _tnbsi_cls = new QS(TNBHS+"/nbsi_tester.class", _tnbsi_j  , "javac -cp %top:%top/junit-4.4.jar %src");
   static final Q _tnbsi_tst = new Q_JUnit(TNBHS+"/nbsi_tester", _tnbsi_cls, "java  -cp %top:%top/junit-4.4.jar:%top/"+TNBHS+" nbsi_tester");
 
   // The high-scale-lib.jar file.  Demand JUnit testing in addition to class files.
   static final Q[] _clss = { _absen_cls, _cat_cls, _cntr_cls, _tnbhm_tst, _tnbhml_tst, _tnbhs_tst, _tnbsi_tst, _unsaf_cls };
-  static final Q _hsl_jar = new Q("high-scale-lib.jar",_clss,' ',"jar -cf %dst %top/"+HSL);
+  static final Q _hsl_jar = new QS("high-scale-lib.jar",_clss,' ',"jar -cf %dst %top/"+HSL);
 
   // The High Scale Lib javadoc files
   static final String HSLDOC = "doc/"+HSL;
-  static final Q _absen_doc= new Q(HSLDOC+"/AbstractEntry.html"         , _absen_j, javadoc);
-  static final Q _cat_doc  = new Q(HSLDOC+"/ConcurrentAutoTable.html"   , _cat_j  , javadoc); 
-  static final Q _cntr_doc = new Q(HSLDOC+"/Counter.html"               , _cntr_j , javadoc);              
-  static final Q _nbhm_doc = new Q(HSLDOC+"/NonBlockingHashMap.html"    , _nbhm_j , javadoc);
-  static final Q _nbhml_doc= new Q(HSLDOC+"/NonBlockingHashMapLong.html", _nbhml_j, javadoc);
-  static final Q _nbhs_doc = new Q(HSLDOC+"/NonBlockingHashSet.html"    , _nbhs_j , javadoc);
-  static final Q _nbsi_doc = new Q(HSLDOC+"/NonBlockingSetInt.html"     , _nbsi_j , javadoc);
-  static final Q _unsaf_doc= new Q(HSLDOC+"/UtilUnsafe.html"            , _unsaf_j, javadoc);
+  static final Q _absen_doc= new QS(HSLDOC+"/AbstractEntry.html"         , _absen_j, javadoc);
+  static final Q _cat_doc  = new QS(HSLDOC+"/ConcurrentAutoTable.html"   , _cat_j  , javadoc); 
+  static final Q _cntr_doc = new QS(HSLDOC+"/Counter.html"               , _cntr_j , javadoc);              
+  static final Q _nbhm_doc = new QS(HSLDOC+"/NonBlockingHashMap.html"    , _nbhm_j , javadoc);
+  static final Q _nbhml_doc= new QS(HSLDOC+"/NonBlockingHashMapLong.html", _nbhml_j, javadoc);
+  static final Q _nbhs_doc = new QS(HSLDOC+"/NonBlockingHashSet.html"    , _nbhs_j , javadoc);
+  static final Q _nbsi_doc = new QS(HSLDOC+"/NonBlockingSetInt.html"     , _nbsi_j , javadoc);
+  static final Q _unsaf_doc= new QS(HSLDOC+"/UtilUnsafe.html"            , _unsaf_j, javadoc);
 
   static final Q[] _docs = { _absen_doc, _cat_doc, _cntr_doc, _nbhm_doc, _nbhml_doc, _nbhs_doc, _nbsi_doc, _unsaf_doc };
-  static final Q _dummy_doc= new Q("doc/dummy",_docs, ' ', "touch %dst");
+  static final Q _dummy_doc= new Q_touch("doc/dummy",_docs);
 }
