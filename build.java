@@ -236,11 +236,20 @@ class build {
     // Correctly reports "not up to date" if modtime is not yet init'd.
     final long latest() {
       // See if we are already up-to-date.  Ugh, time only accurate to milli-
-      // seconds.  Build if times are equal, because I can't tell who's on first.
+      // seconds.  Build if times are equal, because I can't tell who's on
+      // first.  Annoyingly, it's worse than that: the VM or JDK seems to
+      // cache File.lastModified times and update them slowly over time.  So
+      // lastModified time appears to creep upwards!
       long l = 0;
-      for( int i=0; i<_srcs.length; i++ )
-        if( l < _srcs[i]._modtime )
+      for( int i=0; i<_srcs.length; i++ ) {
+        if( _srcs[i]._dst != null ) {
+          long t = _srcs[i]._dst.lastModified();
+          if( t > _srcs[i]._modtime )
+            _srcs[i]._modtime = t;
+        }
+        if( l < _srcs[i]._modtime ) // Now compute max modtime
           l = _srcs[i]._modtime;
+      }
       return l;
     }
 
@@ -324,7 +333,10 @@ class build {
       // the wrong file.
       for( int i=0; i<_srcs.length; i++ )
         if( _srcs[i]._modtime < _srcs[i]._dst.lastModified() )
-          throw new IllegalArgumentException("Timestamp for source file "+_srcs[i]._target+" apparently advanced by building "+_target);
+          throw new IllegalArgumentException("Timestamp for source file "+_srcs[i]._target+
+                                             " apparently advanced by building "+_target+
+                                             " last recorded time="+_srcs[i]._modtime+
+                                             " and now the filesystem reports="+_srcs[i]._dst.lastModified());
 
       // Double-check that this step made progress.  Again, failure here is
       // likely a build-step failure to modify the correct file.
@@ -346,9 +358,10 @@ class build {
           now = System.currentTimeMillis();
         }
         x = now;                // Pretend file was made 'right NOW!'
+        //_dst.setLastModified(x);
       }
       _modtime = x;             // Record apparent mod-time
-      
+
       return true;
     }
 
