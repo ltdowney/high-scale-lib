@@ -422,7 +422,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
    *  most one such mapping.)
    * @throws NullPointerException if the specified key is null */
   // Never returns a Prime nor a Tombstone.
-  public final TypeV get( Object key ) {
+  public TypeV get( Object key ) {
     final Object V = get_impl(this,_kvs,key);
     assert !(V instanceof Prime); // Never return a Prime
     return (TypeV)V;

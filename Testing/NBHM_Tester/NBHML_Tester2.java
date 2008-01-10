@@ -4,6 +4,7 @@
  * Additional test cases provided by Andy Martin of TeleAtlas.
  */
 
+package Testing.NBHM_Tester;
 import java.io.*;
 import java.util.*;
 import java.util.Map.Entry;
@@ -16,7 +17,7 @@ import static org.junit.Assert.*;
 // Test NonBlockingHashMapLong via JUnit
 public class NBHML_Tester2 extends TestCase {
   public static void main(String args[]) {
-    org.junit.runner.JUnitCore.main("NBHML_Tester2");
+    org.junit.runner.JUnitCore.main("Testing.NBHM_Tester.NBHML_Tester2");
   }
 
   private NonBlockingHashMapLong<String> _nbhml;

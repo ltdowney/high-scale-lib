@@ -3,6 +3,7 @@
  * http://creativecommons.org/licenses/publicdomain
  */
 
+package Testing.NBHS_Tester;
 import java.io.*;
 import java.util.*;
 import junit.framework.TestCase;
@@ -13,7 +14,7 @@ import static org.junit.Assert.*;
 // Test NonBlockingHashSet via JUnit
 public class nbhs_tester extends TestCase {
   public static void main(String args[]) {
-    org.junit.runner.JUnitCore.main("nbhs_tester");
+    org.junit.runner.JUnitCore.main("Testing.NBHS_Tester.nbhs_tester");
   }
 
   private NonBlockingHashSet<String> _nbhs;

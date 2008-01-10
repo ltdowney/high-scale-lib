@@ -3,6 +3,7 @@
  * http://creativecommons.org/licenses/publicdomain
  */
 
+package Testing.NBHM_Tester;
 import java.io.*;
 import java.util.*;
 import java.util.Map.Entry;
@@ -15,7 +16,7 @@ import static org.junit.Assert.*;
 // Test NonBlockingHashMap via JUnit
 public class NBHM_Tester2 extends TestCase {
   public static void main(String args[]) {
-    org.junit.runner.JUnitCore.main("NBHM_Tester2");
+    org.junit.runner.JUnitCore.main("Testing.NBHM_Tester.NBHM_Tester2");
   }
 
   private NonBlockingHashMap<String,String> _nbhm;

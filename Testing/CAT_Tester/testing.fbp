@@ -1,7 +1,0 @@
-<Project filename="&lt;&lt;unnamed project&gt;&gt;" projectName="Highly Scalable Java Testing">
-  <Jar>C:\Documents and Settings\Cliff\Desktop\Highly Scalable Java\hsc\Testing\CAT_Tester</Jar>
-  <SrcDir>C:\Documents and Settings\Cliff\Desktop\Highly Scalable Java\hsc\Testing\CAT_Tester</SrcDir>
-  <SuppressionFilter>
-    <LastVersion value="-1" relOp="NEQ"/>
-  </SuppressionFilter>
-</Project>

@@ -28,9 +28,10 @@ import java.util.concurrent.*;
 class build { 
   static private class BuildError extends Error { BuildError( String s ) { super(s); } }
 
-  static boolean _verbose;
-  static boolean _justprint;
-  static boolean _keepontrucking;
+  static boolean _verbose;      // Be noisy
+  static boolean _justprint;    // Print, do not do any building
+  static boolean _clean;        // Remove target instead of building
+  static boolean _keepontrucking; // Do not stop at errors
   // Top-level project directory
   static File TOP;
   static String TOP_PATH;
@@ -59,7 +60,7 @@ class build {
     if( _build_c.make() ) {
       // Since we remade ourself, launch & run self in a nested process to do
       // the actual 'build' using the new version of self.
-      String a = "java build ";
+      String a = "java -cp "+TOP_PATH_SLASH+" build ";
       for( int i=0; i<args.length; i++ )
         a += args[i]+" ";
       ByteArrayOutputStream buf = sys_exec(a);
@@ -76,6 +77,7 @@ class build {
         else if( args[i].equals("-v") ) _verbose = true;
         else if( args[i].equals("-n") ) _justprint = true;
         else if( args[i].equals("-k") ) _keepontrucking = true;
+        else if( args[i].equals("-clean") ) _clean = true;
         else {
           error = true;
           System.out.println("Unknown flag "+args[i]);
@@ -85,7 +87,7 @@ class build {
           error = true;
           System.err.println("Unknown target "+args[i]);
         }
-        args[j++] = args[i];
+        args[j++] = args[i];    // Compact out flags from target list
       }
     }
     if( error ) throw new Error("Command line errors");
@@ -93,22 +95,17 @@ class build {
       System.out.println("Building in "+TOP.getCanonicalPath());
 
     // --- Build all named targets
-    if( !_keepontrucking ) {
-      // Build all till first error
-      for( int i=0; i<j; i++ ) 
-        Q.FILES.get(args[i]).make();
-    } else {
-      // Build all, keep going after failures
+    for( int i=0; i<j; i++ ) {  // For all targets
       try {
-        for( int i=0; i<j; i++ ) 
-          Q.FILES.get(args[i]).make();
+        Q.FILES.get(args[i]).make(); // Build top-level target
       } catch( BuildError e ) {
-        error = true;
+        if( !_keepontrucking ) throw e; // Die at first error
+        error = true;                // Else just print and keep going
         System.err.println(e);
       }
-      if( error ) 
-        throw new BuildError("Some build errors");
     }
+    if( error ) 
+      throw new BuildError("Some build errors");
 
     // --- All Done!
   }
@@ -166,6 +163,7 @@ class build {
       }
     } catch( BuildError be ) {
       // Build-step choked.  Dump any output
+      System.out.println();
       if( out != null ) try { out._buf.writeTo(System.out); } catch( IOException e ) { throw new BuildError(e.toString()); }
       if( err != null ) try { err._buf.writeTo(System.out); } catch( IOException e ) { throw new BuildError(e.toString()); }
       throw be;
@@ -207,7 +205,7 @@ class build {
     }
 
     // --- Constructor for a list of source dependencies
-    Q( String target, Q[] srcs, char src_sep ) {
+    Q( String target, char src_sep, Q[] srcs ) {
       _target = target;
       _src_sep = src_sep;
       _srcs = srcs;
@@ -264,12 +262,32 @@ class build {
       
       // Recursively make required files
       boolean anychanges = false;
-      for( int i=0; i<_srcs.length; i++ )
-        if( _srcs[i].make() )
-          anychanges = true;
+      boolean error = false;
+      for( int i=0; i<_srcs.length; i++ ) {  // For all targets
+        try {
+          if( _srcs[i].make() )   // Build target
+            anychanges = true;    // Record if something changed
+        } catch( BuildError e ) { // Catch build errors!
+          if( !_keepontrucking ) throw e; // Die at first error
+          error = true;           // Else just print and keep going
+          System.err.println(e);
+        }
+      }
+      if( error ) 
+        throw new BuildError("Some build errors");
 
       // Back target string with an OS file
       if( _dst == null ) _dst = new File(TOP,_target);
+
+      // Cleaning?  Nuke target and return
+      if( _clean ) {
+        if( _srcs.length == 0 ) return false; // Do not remove source files
+        if( !_dst.exists() ) return false;    // Already removed
+        System.out.println("rm "+_target);
+        if( !_justprint ) _dst.delete();
+        return true;
+      }
+
       // Re-read, in case changed.  Last ditch effort to start an expensive process.
       // But do not let _modtime roll backwards in any case.
       long t = _dst.lastModified(); 
@@ -342,15 +360,15 @@ class build {
     final String _exec;
     String _parsed_exec;
 
-    QS( String target, Q src, String exec ) {
+    QS( String target, String exec, Q src ) {
       super(target,src);
       _exec = exec;
       init();
     }
 
     // --- Constructor for a list of source dependencies
-    QS( String target, Q[] srcs, char src_sep, String exec ) {
-      super(target,srcs, src_sep);
+    QS( String target, String exec, char src_sep, Q ... srcs ) {
+      super(target, src_sep,srcs);
       _exec = exec;
       init();
     }
@@ -358,8 +376,8 @@ class build {
     private final void init() {
       for( int i=_exec.indexOf('%'); i!= -1; i = _exec.indexOf('%',i+1) ) {
         if( false ) {
-        } else if( _exec.startsWith("src",i+1) ) { 
         } else if( _exec.startsWith("dst",i+1) ) { 
+        } else if( _exec.startsWith("src",i+1) ) { 
         } else if( _exec.startsWith("top",i+1) ) { 
         } else
           throw new IllegalArgumentException("dependency exec has unknown pattern: "+_exec.substring(i));
@@ -371,8 +389,9 @@ class build {
     String parse_exec() {
       if( _parsed_exec == null )
         _parsed_exec = _exec
-          .replaceAll("%src",TOP_PATH_SLASH+"/"+flat_src(_src_sep))
           .replaceAll("%dst",TOP_PATH_SLASH+"/"+_target)
+          .replaceAll("%src0",_srcs[0]._target)
+          .replaceAll("%src",TOP_PATH_SLASH+"/"+flat_src(_src_sep))
           .replaceAll("%top",TOP_PATH_SLASH);
       return _parsed_exec;
     }
@@ -389,14 +408,15 @@ class build {
   // to a log file.
   static private class Q_JUnit extends QS {
     final String _base;
-    Q_JUnit( String base, Q clazzfile, String exec ) {
-      super(base+".log",clazzfile,exec);
+    Q_JUnit( String base, String exec, Q clazzfile, Q junitclazzfile ) {
+      super(base+".log",exec,' ',clazzfile,junitclazzfile);
       _base = base;
     }
 
     protected ByteArrayOutputStream do_it( ) {
       ByteArrayOutputStream out = super.do_it();
       // If we can 'do_it' with no errors, then dump the output to a base.log file
+      if( _justprint ) return out;
       try { 
         File f = new File(TOP_PATH_SLASH+"/"+_base+".log");
         FileOutputStream log = new FileOutputStream(f);
@@ -415,8 +435,7 @@ class build {
   // --- A dependency, just 'touch'ing the target ----------------------------
   // Mostly just a normal dependency
   static private class Q_touch extends Q {
-    Q_touch( String target, Q   src  ) { super(target,src);  }
-    Q_touch( String target, Q[] srcs ) { super(target,srcs, ' '); }
+    Q_touch( String target, Q ... srcs ) { super(target,' ',srcs); }
     protected ByteArrayOutputStream do_it( ) {
       System.out.print("touch "+_target);
       if( _justprint ) return null;
@@ -438,11 +457,10 @@ class build {
   // Some common strings
   static final Q[] NONE = new Q[0];
   static final String javac = "javac -cp %top %src";
-  static final String javadoc = "javadoc -quiet -classpath %top -d %top/doc -package -link http://java.sun.com/j2se/1.5.0/docs/api %src";
 
   // The build-self dependency every project needs
   static final Q _build_j = new Q("build.java");
-  static final Q _build_c = new QS("build.class",_build_j,"javac %src");
+  static final Q _build_c = new QS("build.class","javac %src",_build_j);
 
   // The High Scale Lib java files
   static final String HSL = "org/cliffc/high_scale_lib";
@@ -456,47 +474,63 @@ class build {
   static final Q _unsaf_j = new Q(HSL+"/UtilUnsafe.java");
 
   // The High Scale Lib class files
-  static final Q _absen_cls = new QS(HSL+"/AbstractEntry.class"         , _absen_j, javac);
-  static final Q _cat_cls   = new QS(HSL+"/ConcurrentAutoTable.class"   , _cat_j  , javac); 
-  static final Q _cntr_cls  = new QS(HSL+"/Counter.class"               , _cntr_j , javac);              
-  static final Q _nbhm_cls  = new QS(HSL+"/NonBlockingHashMap.class"    , _nbhm_j , javac);
-  static final Q _nbhml_cls = new QS(HSL+"/NonBlockingHashMapLong.class", _nbhml_j, javac);
-  static final Q _nbhs_cls  = new QS(HSL+"/NonBlockingHashSet.class"    , _nbhs_j , javac);
-  static final Q _nbsi_cls  = new QS(HSL+"/NonBlockingSetInt.class"     , _nbsi_j , javac);
-  static final Q _unsaf_cls = new QS(HSL+"/UtilUnsafe.class"            , _unsaf_j, javac);
+  static final Q _absen_cls = new QS(HSL+"/AbstractEntry.class"         , javac, _absen_j);
+  static final Q _cat_cls   = new QS(HSL+"/ConcurrentAutoTable.class"   , javac, _cat_j  ); 
+  static final Q _cntr_cls  = new QS(HSL+"/Counter.class"               , javac, _cntr_j );              
+  static final Q _nbhm_cls  = new QS(HSL+"/NonBlockingHashMap.class"    , javac, _nbhm_j );
+  static final Q _nbhml_cls = new QS(HSL+"/NonBlockingHashMapLong.class", javac, _nbhml_j);
+  static final Q _nbhs_cls  = new QS(HSL+"/NonBlockingHashSet.class"    , javac, _nbhs_j );
+  static final Q _nbsi_cls  = new QS(HSL+"/NonBlockingSetInt.class"     , javac, _nbsi_j );
+  static final Q _unsaf_cls = new QS(HSL+"/UtilUnsafe.class"            , javac, _unsaf_j);
 
   // The testing files.  JUnit output is in a corresponding .log file.
   static final String TNBHM = "Testing/NBHM_Tester";
+  static final String javac_junit = "javac    -cp %top"+File.pathSeparatorChar+"%top"+File.separatorChar+"junit-4.4.jar %src";
+  static final String java_junit  = "java -ea -cp %top"+File.pathSeparatorChar+"%top"+File.separatorChar+"junit-4.4.jar ";
   static final Q _tnbhm_j   = new Q(TNBHM+"/NBHM_Tester2.java");
-  static final Q _tnbhm_cls = new QS(TNBHM+"/NBHM_Tester2.class", _tnbhm_j  , "javac -cp %top:%top/junit-4.4.jar %src");
-  static final Q _tnbhm_tst = new Q_JUnit(TNBHM+"/NBHM_Tester2", _tnbhm_cls, "java  -cp %top:%top/junit-4.4.jar:%top/"+TNBHM+" NBHM_Tester2");
+  static final Q _tnbhm_cls = new QS(TNBHM+"/NBHM_Tester2.class",javac_junit, _tnbhm_j);
+  static final Q _tnbhm_tst = new Q_JUnit(TNBHM+"/NBHM_Tester2", java_junit+"Testing.NBHM_Tester.NBHM_Tester2", _nbhm_cls,_tnbhm_cls);
   static final Q _tnbhml_j  = new Q(TNBHM+"/NBHML_Tester2.java");
-  static final Q _tnbhml_cls= new QS(TNBHM+"/NBHML_Tester2.class",_tnbhml_j  ,"javac -cp %top:%top/junit-4.4.jar %src");
-  static final Q _tnbhml_tst= new Q_JUnit(TNBHM+"/NBHML_Tester2",_tnbhml_cls,"java  -cp %top:%top/junit-4.4.jar:%top/"+TNBHM+" NBHML_Tester2");
+  static final Q _tnbhml_cls= new QS(TNBHM+"/NBHML_Tester2.class",javac_junit,_tnbhml_j);
+  static final Q _tnbhml_tst= new Q_JUnit(TNBHM+"/NBHML_Tester2", java_junit+"Testing.NBHM_Tester.NBHML_Tester2",_nbhml_cls,_tnbhml_cls);
 
   static final String TNBHS = "Testing/NBHS_Tester";
   static final Q _tnbhs_j   = new Q(TNBHS+"/nbhs_tester.java");
-  static final Q _tnbhs_cls = new QS(TNBHS+"/nbhs_tester.class", _tnbhs_j  , "javac -cp %top:%top/junit-4.4.jar %src");
-  static final Q _tnbhs_tst = new Q_JUnit(TNBHS+"/nbhs_tester", _tnbhs_cls, "java  -cp %top:%top/junit-4.4.jar:%top/"+TNBHS+" nbhs_tester");
+  static final Q _tnbhs_cls = new QS(TNBHS+"/nbhs_tester.class",javac_junit, _tnbhs_j);
+  static final Q _tnbhs_tst = new Q_JUnit(TNBHS+"/nbhs_tester", java_junit+"Testing.NBHS_Tester.nbhs_tester",_nbhs_cls, _tnbhs_cls);
   static final Q _tnbsi_j   = new Q(TNBHS+"/nbsi_tester.java");
-  static final Q _tnbsi_cls = new QS(TNBHS+"/nbsi_tester.class", _tnbsi_j  , "javac -cp %top:%top/junit-4.4.jar %src");
-  static final Q _tnbsi_tst = new Q_JUnit(TNBHS+"/nbsi_tester", _tnbsi_cls, "java  -cp %top:%top/junit-4.4.jar:%top/"+TNBHS+" nbsi_tester");
+  static final Q _tnbsi_cls = new QS(TNBHS+"/nbsi_tester.class",javac_junit, _tnbsi_j);
+  static final Q _tnbsi_tst = new Q_JUnit(TNBHS+"/nbsi_tester", java_junit+"Testing.NBHS_Tester.nbsi_tester", _nbsi_cls,_tnbsi_cls);
 
-  // The high-scale-lib.jar file.  Demand JUnit testing in addition to class files.
-  static final Q[] _clss = { _absen_cls, _cat_cls, _cntr_cls, _tnbhm_tst, _tnbhml_tst, _tnbhs_tst, _tnbsi_tst, _unsaf_cls };
-  static final Q _hsl_jar = new QS("high-scale-lib.jar",_clss,' ',"jar -cf %dst %top/"+HSL);
+  // The high-scale-lib.jar file.  Demand JUnit testing in addition to class
+  // files (the testing demands the relavent class files).
+  static final Q _hsl_jar = new QS("high-scale-lib.jar","jar -cf %dst %top/"+HSL,' ',
+                                   _absen_cls, _cat_cls, _cntr_cls, _tnbhm_tst, _tnbhml_tst, _tnbhs_tst, _tnbsi_tst, _unsaf_cls );
+
+  // Wrappers for common JDK files
+  static final String JU = "java/util";
+  static final Q _ht_j   = new Q (JU+"/Hashtable.java");
+  static final Q _ht_cls = new QS(JU+"/Hashtable.class", javac, _ht_j);
+  static final Q _ht_jar = new QS("java_util_hashtable.jar","jar -cf %dst -C %top %src0 -C %top "+HSL,' ',_ht_cls,_hsl_jar);
+
+  static final String JUC = JU+"/concurrent";
+  static final Q _chm_j   = new Q (JUC+"/ConcurrentHashMap.java");
+  static final Q _chm_cls = new QS(JUC+"/ConcurrentHashMap.class", javac, _chm_j);
+  static final Q _chm_jar = new QS("java_util_concurrent_chm.jar","jar -cf %dst -C %top %src0 -C %top "+HSL,' ',_chm_cls,_hsl_jar);
+
 
   // The High Scale Lib javadoc files
+  static final String javadoc = "javadoc -quiet -classpath %top -d %top/doc -package -link http://java.sun.com/j2se/1.5.0/docs/api %src";
   static final String HSLDOC = "doc/"+HSL;
-  static final Q _absen_doc= new QS(HSLDOC+"/AbstractEntry.html"         , _absen_j, javadoc);
-  static final Q _cat_doc  = new QS(HSLDOC+"/ConcurrentAutoTable.html"   , _cat_j  , javadoc); 
-  static final Q _cntr_doc = new QS(HSLDOC+"/Counter.html"               , _cntr_j , javadoc);              
-  static final Q _nbhm_doc = new QS(HSLDOC+"/NonBlockingHashMap.html"    , _nbhm_j , javadoc);
-  static final Q _nbhml_doc= new QS(HSLDOC+"/NonBlockingHashMapLong.html", _nbhml_j, javadoc);
-  static final Q _nbhs_doc = new QS(HSLDOC+"/NonBlockingHashSet.html"    , _nbhs_j , javadoc);
-  static final Q _nbsi_doc = new QS(HSLDOC+"/NonBlockingSetInt.html"     , _nbsi_j , javadoc);
-  static final Q _unsaf_doc= new QS(HSLDOC+"/UtilUnsafe.html"            , _unsaf_j, javadoc);
+  static final Q _absen_doc= new QS(HSLDOC+"/AbstractEntry.html"         , javadoc, _absen_j);
+  static final Q _cat_doc  = new QS(HSLDOC+"/ConcurrentAutoTable.html"   , javadoc, _cat_j  ); 
+  static final Q _cntr_doc = new QS(HSLDOC+"/Counter.html"               , javadoc, _cntr_j );              
+  static final Q _nbhm_doc = new QS(HSLDOC+"/NonBlockingHashMap.html"    , javadoc, _nbhm_j );
+  static final Q _nbhml_doc= new QS(HSLDOC+"/NonBlockingHashMapLong.html", javadoc, _nbhml_j);
+  static final Q _nbhs_doc = new QS(HSLDOC+"/NonBlockingHashSet.html"    , javadoc, _nbhs_j );
+  static final Q _nbsi_doc = new QS(HSLDOC+"/NonBlockingSetInt.html"     , javadoc, _nbsi_j );
+  static final Q _unsaf_doc= new QS(HSLDOC+"/UtilUnsafe.html"            , javadoc, _unsaf_j);
 
-  static final Q[] _docs = { _absen_doc, _cat_doc, _cntr_doc, _nbhm_doc, _nbhml_doc, _nbhs_doc, _nbsi_doc, _unsaf_doc };
-  static final Q _dummy_doc= new Q_touch("doc/dummy",_docs);
+  static final Q _dummy_doc= new Q_touch("doc/dummy",
+                                         _absen_doc, _cat_doc, _cntr_doc, _nbhm_doc, _nbhml_doc, _nbhs_doc, _nbsi_doc, _unsaf_doc );
 }
