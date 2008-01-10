@@ -27,10 +27,10 @@ import java.lang.reflect.*;
  * 32-way Sun Niagra box, 8-way Intel box and a 4-way Power box.
  *
  * <p><strong>The main benefit of this class</strong> over using plain {@link
- * NonBlockingHashMap} with {@link Long} keys is that it avoids the
- * auto-boxing and unboxing costs.  Since auto-boxing is <em>automatic</em>,
- * it is easy to accidentally cause auto-boxing and negate the space and speed
- * benefits.
+ * org.cliffc.high_scale_lib.NonBlockingHashMap} with {@link Long} keys is
+ * that it avoids the auto-boxing and unboxing costs.  Since auto-boxing is
+ * <em>automatic</em>, it is easy to accidentally cause auto-boxing and negate
+ * the space and speed benefits.
  * 
  * <p>This class obeys the same functional specification as {@link
  * java.util.Hashtable}, and includes versions of methods corresponding to
@@ -211,9 +211,9 @@ public class NonBlockingHashMapLong<TypeV>
    *  to 8 K/V pairs or roughly 84 bytes on a standard 32-bit JVM). */
   public NonBlockingHashMapLong( ) { this(MIN_SIZE,true); }
 
-  /** Create a new NonBlockingHashMap with initial room for the given number of
-   *  elements, thus avoiding internal resizing operations to reach an
-   *  appropriate size.  Large numbers here when used with a small count of
+  /** Create a new NonBlockingHashMapLong with initial room for the given
+   *  number of elements, thus avoiding internal resizing operations to reach
+   *  an appropriate size.  Large numbers here when used with a small count of
    *  elements will sacrifice space for a small amount of time gained.  The
    *  initial size will be rounded up internally to the next larger power of 2. */
   public NonBlockingHashMapLong( final int initial_sz ) { this(initial_sz,true); }
@@ -1142,11 +1142,11 @@ public class NonBlockingHashMapLong<TypeV>
    *  
    *  <p><strong>Warning:</strong> the iterator associated with this Set
    *  requires the creation of {@link java.util.Map.Entry} objects with each
-   *  iteration.  The {@link NonBlockingHashMap} does not normally create or
-   *  using {@link java.util.Map.Entry} objects so they will be created soley
-   *  to support this iteration.  Iterating using {@link #keySet} or {@link
-   *  #values} will be more efficient.  In addition, this version requires
-   *  <strong>auto-boxing</strong> the keys.
+   *  iteration.  The {@link org.cliffc.high_scale_lib.NonBlockingHashMap}
+   *  does not normally create or using {@link java.util.Map.Entry} objects so
+   *  they will be created soley to support this iteration.  Iterating using
+   *  {@link #keySet} or {@link #values} will be more efficient.  In addition,
+   *  this version requires <strong>auto-boxing</strong> the keys.
    */
   public Set<Map.Entry<Long,TypeV>> entrySet() {
     return new AbstractSet<Map.Entry<Long,TypeV>>() {
