@@ -336,11 +336,11 @@ class build {
         throw new IllegalArgumentException("Timestamp for "+_target+" not changed by building "+_target);
       _modtime = x;
       long now = System.currentTimeMillis();
-      if( now <= _modtime ) 
-        throw new IllegalArgumentException("Timestamp for "+_target+" moving into the future by building ");
+      if( now < _modtime ) 
+        throw new IllegalArgumentException("Timestamp for "+_target+" moving into the future by building.  _modtime="+_modtime+" and now="+now );
       if( _modtime < last_src )
         throw new IllegalArgumentException("Timestamp for "+_target+" not changed by building "+_target);
-      // Invariant: last_src <= _modtime < now
+      // Invariant: last_src <= _modtime <= now
 
       
       // For very fast build-steps, the target may be updated to a time equal
