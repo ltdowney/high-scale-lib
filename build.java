@@ -453,8 +453,10 @@ class build {
       System.out.print("touch "+_target);
       if( _justprint ) return null;
       File f = new File(TOP_PATH_SLASH+"/"+_target);
-      try { f.createNewFile(); }
-      catch( IOException e ) {
+      try { 
+        f.delete();
+        f.createNewFile(); 
+      } catch( IOException e ) {
         throw new BuildError("Unable to make file "+_target+": "+e.toString());
       }
       return null;              // No output from a 'touch'
@@ -468,7 +470,6 @@ class build {
   // =========================================================================
 
   // Some common strings
-  static final Q[] NONE = new Q[0];
   static final String javac = "javac -cp %top %src";
 
   // The build-self dependency every project needs

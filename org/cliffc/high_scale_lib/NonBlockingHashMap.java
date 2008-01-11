@@ -252,7 +252,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
     if( initial_sz < 0 ) throw new IllegalArgumentException();
     int i;                      // Convert to next largest power-of-2
     if( initial_sz > 1024*1024 ) initial_sz = 1024*1024;
-    for( i=MIN_SIZE_LOG; (1<<i) < initial_sz; i++ ) ;
+    for( i=MIN_SIZE_LOG; (1<<i) < (initial_sz<<2); i++ ) ;
     // Double size for K,V pairs, add 1 for CHM and 1 for hashes
     _kvs = new Object[((1<<i)<<1)+2];
     _kvs[0] = new CHM(new Counter()); // CHM in slot 0
@@ -812,7 +812,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
         //notifyAll();            // Wake up any sleepers
         //long nano = System.nanoTime();
         //System.out.println(" "+nano+" Resize from "+oldlen+" to "+(1<<log2)+" and had "+(_resizers-1)+" extras" );
-        //System.out.print("["+log2);
+        //if( System.out != null ) System.out.print("["+log2);
         topmap.rehash();        // Call for Hashtable's benefit
       } else                    // CAS failed?
         newkvs = _newkvs;       // Reread new table
@@ -943,7 +943,7 @@ public class NonBlockingHashMap<TypeK, TypeV>
         topmap._last_resize_milli = System.currentTimeMillis();  // Record resize time for next check
         //long nano = System.nanoTime();
         //System.out.println(" "+nano+" Promote table to "+len(_newkvs));
-        //System.out.print("]");
+        //if( System.out != null ) System.out.print("]");
       }
     }
 
