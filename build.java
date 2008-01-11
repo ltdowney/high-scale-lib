@@ -32,6 +32,7 @@ class build {
   static boolean _justprint;    // Print, do not do any building
   static boolean _clean;        // Remove target instead of building
   static boolean _keepontrucking; // Do not stop at errors
+  static boolean _allow_timestamp_ties = true;
   // Top-level project directory
   static File TOP;
   static String TOP_PATH;
@@ -183,8 +184,11 @@ class build {
     final char _src_sep;
     // These next fields are filled in lazily, as needed.
     String _flat_src;
-    File _dst;                  // Actual OS files
-    long _modtime;           // Actual (or effective mod time for '-n' builds)
+    File _dst;                  // Actual OS file
+    // I assume that calling lastModified() is a modestly expensive OS call.
+    // I *know* that some OS's report file timestamps rounded down badly, to
+    // the nearest 1 second on linux.
+    long _modtime;           // Cache of _dst.lastModified() (or System.CTM for -n builds)
 
     // --- Constructor for a root file; no dependencies
     static final private Q[] NONE = new Q[0];
@@ -216,7 +220,6 @@ class build {
       // Basic sanity checking
       if( _target.indexOf('%') != -1 ) 
         throw new IllegalArgumentException("dependency target has a '%': "+_target);
-      _flat_src = flat_src(',');
 
       // Install the target/dependency mapping in a flat table
       if( FILES.put(_target,this) != null ) 
@@ -227,29 +230,17 @@ class build {
       String s = "";
       if( _srcs.length==0 ) return s;
       for( int i=0; i<_srcs.length-1; i++ )
-        s += _srcs[i]._target+sep;
-      s += _srcs[_srcs.length-1]._target;
+        s += TOP_PATH_SLASH+"/"+_srcs[i]._target+sep;
+      s += TOP_PATH_SLASH+"/"+_srcs[_srcs.length-1]._target;
       return s;
     }
 
-    // True if our file modtime is after all source file mod times.
-    // Correctly reports "not up to date" if modtime is not yet init'd.
+    // Report latest source file mod time.
     final long latest() {
-      // See if we are already up-to-date.  Ugh, time only accurate to milli-
-      // seconds.  Build if times are equal, because I can't tell who's on
-      // first.  Annoyingly, it's worse than that: the VM or JDK seems to
-      // cache File.lastModified times and update them slowly over time.  So
-      // lastModified time appears to creep upwards!
       long l = 0;
-      for( int i=0; i<_srcs.length; i++ ) {
-        if( _srcs[i]._dst != null ) {
-          long t = _srcs[i]._dst.lastModified();
-          if( t > _srcs[i]._modtime )
-            _srcs[i]._modtime = t;
-        }
-        if( l < _srcs[i]._modtime ) // Now compute max modtime
+      for( int i=0; i<_srcs.length; i++ )
+        if( l < _srcs[i]._modtime )
           l = _srcs[i]._modtime;
-      }
       return l;
     }
 
@@ -261,14 +252,20 @@ class build {
     // --- make
     // Run the 'exec' string if the source file is more recent than the target file.
     // Return true if the target file (apparently) got updated.
+    // File times are maintained *very* coarsely by some OS's: linux rounds down to 1 sec
     final boolean make() {
-      // See if we are already up-to-date.
-      // Check for before checking for init'ing modtime as a speed hack.
-      if( _modtime > latest() ) {
-        if( _verbose ) System.out.println(_target+ " > {" +_flat_src + "} : already up to date");
-        return false;           // Update-to-date, nothing changed
-      }
-      
+
+      // See if we are already up-to-date.  We do it when we first back the
+      // target string with an OS file.  Must check before recursion, or else
+      // a DAG takes exponentional time.
+      if( _dst != null ) 
+        return false;
+
+      // Back target string with an OS file.
+      _dst = new File(TOP,_target);
+      _modtime = _dst.lastModified(); // Cache OS time
+      _flat_src = flat_src(','); // Prep, in case we need to print any errors
+
       // Recursively make required files
       boolean anychanges = false;
       boolean error = false;
@@ -282,11 +279,8 @@ class build {
           System.err.println(e);
         }
       }
-      if( error ) 
+      if( error )               // Die now, if we had any errors building children
         throw new BuildError("Some build errors");
-
-      // Back target string with an OS file
-      if( _dst == null ) _dst = new File(TOP,_target);
 
       // Cleaning?  Nuke target and return
       if( _clean ) {
@@ -297,19 +291,16 @@ class build {
         return true;
       }
 
-      // Re-read, in case changed.  Last ditch effort to start an expensive process.
-      // But do not let _modtime roll backwards in any case.
-      long t = _dst.lastModified(); 
-      if( t > _modtime ) _modtime = t;
-
-      long last_src = latest(); // Lastest source-file time
-      if( !anychanges && _modtime > last_src ) { // Ahhh, all is well
+      // Now see if we are later or earlier
+      long last_src = latest();
+      if( _modtime >= last_src ) {
         if( _verbose ) System.out.println(_target+ " > {" +_flat_src + "} : already up to date");
-        return false;
+        return false;           // Update-to-date, nothing changed
       }
 
       // Files out of date; must do this build step
       if( _verbose ) System.out.println(_target+ " <= {"+_flat_src+"}");
+
       // Actually do the build-step
       try {
         do_it();
@@ -332,9 +323,9 @@ class build {
       // basically indicate a broken build file - the build-step is changing
       // the wrong file.
       for( int i=0; i<_srcs.length; i++ )
-        if( _srcs[i]._modtime < _srcs[i]._dst.lastModified() )
+        if( _srcs[i]._modtime != _srcs[i]._dst.lastModified() )
           throw new IllegalArgumentException("Timestamp for source file "+_srcs[i]._target+
-                                             " apparently advanced by building "+_target+
+                                             " apparently changed by building "+_target+
                                              " last recorded time="+_srcs[i]._modtime+
                                              " and now the filesystem reports="+_srcs[i]._dst.lastModified());
 
@@ -343,22 +334,30 @@ class build {
       long x = _dst.lastModified();
       if( _modtime == x )
         throw new IllegalArgumentException("Timestamp for "+_target+" not changed by building "+_target);
+      _modtime = x;
+      long now = System.currentTimeMillis();
+      if( now <= _modtime ) 
+        throw new IllegalArgumentException("Timestamp for "+_target+" moving into the future by building ");
+      if( _modtime < last_src )
+        throw new IllegalArgumentException("Timestamp for "+_target+" not changed by building "+_target);
+      // Invariant: last_src <= _modtime < now
+
       
       // For very fast build-steps, the target may be updated to a time equal
       // to the input file times after rounding to the file-system's time
       // precision - which might be as bad as 1 whole second.  Assume the
       // build step worked, but give the result an apparent time just past the
       // src file times to make later steps more obvious.
-      if( x < last_src )
-        throw new IllegalArgumentException("Timestamp of "+_target+" not moved past {"+_flat_src+"} timestamps by building ");
-      if( x == last_src ) {     // Aaahh, we have 'tied' in the timestamps
-        long now = System.currentTimeMillis();
-        while( now <= x ) {     // Stall till real-time is in a new milli-second
+      if( !_allow_timestamp_ties ) {
+        while( x == last_src ) {     // Aaahh, we have 'tied' in the timestamps!!!
+          // Sleep/spin until the OS's version of a rounded timestamp shows real progress
           try { Thread.sleep(1); } catch( InterruptedException e ) { };
           now = System.currentTimeMillis();
+          _dst.setLastModified(now); // Pretend file was made 'right NOW!'
+          x = _dst.lastModified(); // Reload, after OS rounding
         }
-        x = now;                // Pretend file was made 'right NOW!'
-        //_dst.setLastModified(x);
+        if( _modtime == last_src )
+          System.out.println("Yawners... had to sleep "+(System.currentTimeMillis()-_modtime)+" msec to get timestamp to advance");
       }
       _modtime = x;             // Record apparent mod-time
 
@@ -404,7 +403,7 @@ class build {
         _parsed_exec = _exec
           .replaceAll("%dst",TOP_PATH_SLASH+"/"+_target)
           .replaceAll("%src0",_srcs[0]._target)
-          .replaceAll("%src",TOP_PATH_SLASH+"/"+flat_src(_src_sep))
+          .replaceAll("%src",flat_src(_src_sep))
           .replaceAll("%top",TOP_PATH_SLASH);
       return _parsed_exec;
     }
@@ -456,6 +455,11 @@ class build {
       try { 
         f.delete();
         f.createNewFile(); 
+        // You would think that to delete & create the file would update the
+        // lastMod time accurately, but on linux at least it appears it can be
+        // created at least 1 msec in the past.
+        long t = System.currentTimeMillis();
+        f.setLastModified(t);
       } catch( IOException e ) {
         throw new BuildError("Unable to make file "+_target+": "+e.toString());
       }
@@ -567,7 +571,7 @@ class build {
   static final Q _nbht_cls= new QS(HSL+"/NonBlockingHashtable.class", javac, _nbht_j);
 
   static final Q _ht_j   = new Q (JU+"/Hashtable.java");
-  static final Q _ht_cls = new QS(JU+"/Hashtable.class", javac, _ht_j);
+  static final Q _ht_cls = new QS(JU+"/Hashtable.class", "javac -cp %top %top/%src0", ' ', _ht_j, _nbht_cls);
   static final Q _ht_jar = new QS("lib/java_util_hashtable.jar","jar -cf %dst -C %top %src0 -C %top "+HSL,' ',_ht_cls,_hsl_jar);
 
   static final String JUC = JU+"/concurrent";
@@ -579,18 +583,7 @@ class build {
 
 
   // The High Scale Lib javadoc files
-  static final String javadoc = "javadoc -quiet -classpath %top -d %top/doc -package -link http://java.sun.com/j2se/1.5.0/docs/api %top/"+HSL+"/*.java";
-  static final String HSLDOC = "doc/"+HSL;
-  static final Q _absen_doc= new QS(HSLDOC+"/AbstractEntry.html"         , javadoc, _absen_j);
-  static final Q _cat_doc  = new QS(HSLDOC+"/ConcurrentAutoTable.html"   , javadoc, _cat_j  ); 
-  static final Q _cntr_doc = new QS(HSLDOC+"/Counter.html"               , javadoc, _cntr_j );              
-  static final Q _nbhm_doc = new QS(HSLDOC+"/NonBlockingHashMap.html"    , javadoc, _nbhm_j );
-  static final Q _nbhml_doc= new QS(HSLDOC+"/NonBlockingHashMapLong.html", javadoc, _nbhml_j);
-  static final Q _nbhs_doc = new QS(HSLDOC+"/NonBlockingHashSet.html"    , javadoc, _nbhs_j );
-  static final Q _nbsi_doc = new QS(HSLDOC+"/NonBlockingSetInt.html"     , javadoc, _nbsi_j );
-  static final Q _unsaf_doc= new QS(HSLDOC+"/UtilUnsafe.html"            , javadoc, _unsaf_j);
-
-  static final Q _docs = new Q_touch("docs", _absen_doc, _cat_doc, _cntr_doc, _nbhm_doc, _nbhml_doc, _nbhs_doc, _nbsi_doc, _unsaf_doc );
+  static final Q _docs = new QS("doc/index.html","javadoc -quiet -classpath %top -d %top/doc -package -link http://java.sun.com/j2se/1.5.0/docs/api %src",' ',_absen_j,_cat_j,_cntr_j,_nbhm_j,_nbht_j,_nbhml_j,_nbhs_j,_nbsi_j,_unsaf_j);
 
   // Build everything
   static final Q _all = new Q_touch("all", _docs, _libs);
