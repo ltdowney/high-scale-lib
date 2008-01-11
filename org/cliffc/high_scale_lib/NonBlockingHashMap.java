@@ -13,12 +13,12 @@ import java.util.concurrent.atomic.*;
 import sun.misc.Unsafe;
 
 /**
- * A lock-free alternate implementation of {@link java.util.ConcurrentHashMap}
+ * A lock-free alternate implementation of {@link java.util.concurrent.ConcurrentHashMap}
  * with better scaling properties and generally lower costs to mutate the Map.
  * It provides identical correctness properties as ConcurrentHashMap.  All
  * operations are non-blocking and multi-thread safe, including all update
  * operations.  {@link NonBlockingHashMap} scales substatially better than
- * {@link java.util.ConcurrentHashMap} for high update rates, even with a
+ * {@link java.util.concurrent.ConcurrentHashMap} for high update rates, even with a
  * large concurrency factor.  Scaling is linear up to 768 CPUs on a 768-CPU
  * Azul box, even with 100% updates or 100% reads or any fraction in-between.
  * Linear scaling up to all cpus has been observed on a 32-way Sun US2 box,
@@ -267,6 +267,9 @@ public class NonBlockingHashMap<TypeK, TypeV>
   /** Returns the number of key-value mappings in this map.
    *  @return the number of key-value mappings in this map */
   public int     size       ( )                       { return chm(_kvs).size(); }
+  /** Returns <tt>size() == 0</tt>.
+   *  @return <tt>size() == 0</tt> */
+  public boolean isEmpty    ( )                       { return size() == 0;      }
 
   /** Tests if the key in the table using the <tt>equals</tt> method.
    * @return <tt>true</tt> if the key is in the table using the <tt>equals</tt> method
@@ -397,6 +400,38 @@ public class NonBlockingHashMap<TypeK, TypeV>
     } catch (CloneNotSupportedException e) { 
       // this shouldn't happen, since we are Cloneable
       throw new InternalError();
+    }
+  }
+
+    /**
+     * Returns a string representation of this map.  The string representation
+     * consists of a list of key-value mappings in the order returned by the
+     * map's <tt>entrySet</tt> view's iterator, enclosed in braces
+     * (<tt>"{}"</tt>).  Adjacent mappings are separated by the characters
+     * <tt>", "</tt> (comma and space).  Each key-value mapping is rendered as
+     * the key followed by an equals sign (<tt>"="</tt>) followed by the
+     * associated value.  Keys and values are converted to strings as by
+     * {@link String#valueOf(Object)}.
+     *
+     * @return a string representation of this map
+     */
+  public String toString() {
+    Iterator<Entry<TypeK,TypeV>> i = entrySet().iterator();
+    if (! i.hasNext())
+      return "{}";
+    
+    StringBuilder sb = new StringBuilder();
+    sb.append('{');
+    for (;;) {
+      Entry<TypeK,TypeV> e = i.next();
+      TypeK key = e.getKey();
+      TypeV value = e.getValue();
+      sb.append(key   == this ? "(this Map)" : key);
+      sb.append('=');
+      sb.append(value == this ? "(this Map)" : value);
+      if (! i.hasNext())
+        return sb.append('}').toString();
+      sb.append(", ");
     }
   }
 

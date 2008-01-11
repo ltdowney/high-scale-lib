@@ -463,6 +463,45 @@ class build {
     }
   }
 
+  // --- A dependency, doing a global string replace -------------------------
+  // Mostly just a normal dependency, except the build action is to copy
+  // NonBlockingHashMap.java into NonBlockingHashtable.java - substituting the
+  // class name and changing the parent 'extends' clause from AbstractMap to
+  // Dictionary.  This is because the same source file can be used for both
+  // Hashtable and HashMap - except they extend different parent classes.
+  static private class Q_hashtable extends Q {
+    Q_hashtable( String target, Q src ) { super(target,src); }
+    protected ByteArrayOutputStream do_it( ) {
+      System.out.print("s/NonBlockingHashMap/NonBlockingHashtable/g "+_srcs[0]._target+" > "+_target);
+      if( _justprint ) return null;
+      try { 
+        // Inhale NBHM.java
+        FileInputStream bits = new FileInputStream(_srcs[0]._dst);
+        byte[] buf = new byte[100000];
+        int len = bits.read(buf);
+        if( len < 1000 || len == buf.length ) 
+          throw new IOException("Unexpected file length read, "+len+" bytes read from "+_srcs[0]._target);
+
+        // Do some string replacement stuff
+        String s = new String(buf,0,len);
+        String t = s.replaceAll("NonBlockingHashMap","NonBlockingHashtable");
+        String u = t.replaceAll("AbstractMap","Dictionary");
+        String v = u.replaceAll("\npackage","\n/* WARNING: MACHINE GENERATED FILE!  DO NOT EDIT!*/\npackage");
+        byte[] outbuf = v.getBytes();
+
+        // Write out the replacement
+        _dst.delete();          // Nuke output file first
+        FileOutputStream out = new FileOutputStream(_dst);
+        out.write(outbuf);
+        out.close();
+
+      } catch( IOException e ) {
+        throw new BuildError("Unable to make file "+_target+": "+e.toString());
+      }
+      return null;              // No output from a 'touch'
+    }
+  }
+
 
 
   // =========================================================================
@@ -499,8 +538,9 @@ class build {
 
   // The testing files.  JUnit output is in a corresponding .log file.
   static final String TNBHM = "Testing/NBHM_Tester";
-  static final String javac_junit = "javac    -cp %top"+File.pathSeparatorChar+"%top"+File.separatorChar+"junit-4.4.jar %src";
-  static final String java_junit  = "java -ea -cp %top"+File.pathSeparatorChar+"%top"+File.separatorChar+"junit-4.4.jar ";
+  static final String JUNIT = "%top/lib/junit-4.4.jar";
+  static final String javac_junit = "javac    -cp %top"+File.pathSeparatorChar+JUNIT+" %src";
+  static final String java_junit  = "java -ea -cp %top"+File.pathSeparatorChar+JUNIT+" ";
   static final Q _tnbhm_j   = new Q(TNBHM+"/NBHM_Tester2.java");
   static final Q _tnbhm_cls = new QS(TNBHM+"/NBHM_Tester2.class",javac_junit, _tnbhm_j);
   static final Q _tnbhm_tst = new Q_JUnit(TNBHM+"/NBHM_Tester2", java_junit+"Testing.NBHM_Tester.NBHM_Tester2", _nbhm_cls,_tnbhm_cls);
@@ -518,23 +558,28 @@ class build {
 
   // The high-scale-lib.jar file.  Demand JUnit testing in addition to class
   // files (the testing demands the relavent class files).
-  static final Q _hsl_jar = new QS("high-scale-lib.jar","jar -cf %dst %top/"+HSL,' ',
+  static final Q _hsl_jar = new QS("lib/high-scale-lib.jar","jar -cf %dst %top/"+HSL,' ',
                                    _absen_cls, _cat_cls, _cntr_cls, _tnbhm_tst, _tnbhml_tst, _tnbhs_tst, _tnbsi_tst, _unsaf_cls );
 
   // Wrappers for common JDK files
   static final String JU = "java/util";
+  static final Q _nbht_j  = new Q_hashtable(HSL+"/NonBlockingHashtable.java", _nbhm_j);
+  static final Q _nbht_cls= new QS(HSL+"/NonBlockingHashtable.class", javac, _nbht_j);
+
   static final Q _ht_j   = new Q (JU+"/Hashtable.java");
   static final Q _ht_cls = new QS(JU+"/Hashtable.class", javac, _ht_j);
-  static final Q _ht_jar = new QS("java_util_hashtable.jar","jar -cf %dst -C %top %src0 -C %top "+HSL,' ',_ht_cls,_hsl_jar);
+  static final Q _ht_jar = new QS("lib/java_util_hashtable.jar","jar -cf %dst -C %top %src0 -C %top "+HSL,' ',_ht_cls,_hsl_jar);
 
   static final String JUC = JU+"/concurrent";
   static final Q _chm_j   = new Q (JUC+"/ConcurrentHashMap.java");
   static final Q _chm_cls = new QS(JUC+"/ConcurrentHashMap.class", javac, _chm_j);
-  static final Q _chm_jar = new QS("java_util_concurrent_chm.jar","jar -cf %dst -C %top %src0 -C %top "+HSL,' ',_chm_cls,_hsl_jar);
+  static final Q _chm_jar = new QS("lib/java_util_concurrent_chm.jar","jar -cf %dst -C %top %src0 -C %top "+HSL,' ',_chm_cls,_hsl_jar);
+
+  static final Q _libs= new Q_touch("libs", _hsl_jar, _ht_jar, _chm_jar );
 
 
   // The High Scale Lib javadoc files
-  static final String javadoc = "javadoc -quiet -classpath %top -d %top/doc -package -link http://java.sun.com/j2se/1.5.0/docs/api %src";
+  static final String javadoc = "javadoc -quiet -classpath %top -d %top/doc -package -link http://java.sun.com/j2se/1.5.0/docs/api %top/"+HSL+"/*.java";
   static final String HSLDOC = "doc/"+HSL;
   static final Q _absen_doc= new QS(HSLDOC+"/AbstractEntry.html"         , javadoc, _absen_j);
   static final Q _cat_doc  = new QS(HSLDOC+"/ConcurrentAutoTable.html"   , javadoc, _cat_j  ); 
@@ -545,6 +590,10 @@ class build {
   static final Q _nbsi_doc = new QS(HSLDOC+"/NonBlockingSetInt.html"     , javadoc, _nbsi_j );
   static final Q _unsaf_doc= new QS(HSLDOC+"/UtilUnsafe.html"            , javadoc, _unsaf_j);
 
-  static final Q _dummy_doc= new Q_touch("doc/dummy",
-                                         _absen_doc, _cat_doc, _cntr_doc, _nbhm_doc, _nbhml_doc, _nbhs_doc, _nbsi_doc, _unsaf_doc );
+  static final Q _docs = new Q_touch("docs", _absen_doc, _cat_doc, _cntr_doc, _nbhm_doc, _nbhml_doc, _nbhs_doc, _nbsi_doc, _unsaf_doc );
+
+  // Build everything
+  static final Q _all = new Q_touch("all", _docs, _libs);
+
 }
+

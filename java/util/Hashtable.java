@@ -6,7 +6,7 @@
 package java.util;
 import  java.io.*;
 import  java.util.Map;
-import  org.cliffc.high_scale_lib.NonBlockingHashMap;
+import  org.cliffc.high_scale_lib.NonBlockingHashtable;
 
 /**
  * A plug-in replacement for JDK1.5 {@link java.util.Hashtable}.  This version
@@ -29,7 +29,7 @@ import  org.cliffc.high_scale_lib.NonBlockingHashMap;
  * @param <TypeK> the type of keys maintained by this map
  * @param <TypeV> the type of mapped values
  */
-public class Hashtable<K, V> extends NonBlockingHashMap<K, V> {
+public class Hashtable<K, V> extends NonBlockingHashtable<K, V> {
   /** use serialVersionUID from JDK 1.0.2 for interoperability */
   private static final long serialVersionUID = 1421746759512286392L;
   // Field included strictly to pass the serialization JCK tests
