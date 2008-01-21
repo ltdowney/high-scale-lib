@@ -651,7 +651,7 @@ public class NonBlockingHashMapLong<TypeV>
         // new table.  Otherwise we lost the CAS to another racing put.
         // Simply retry from the start.
         if( V instanceof Prime )
-          return _newchm.putIfMatch(key,putval,expVal);
+          return copy_slot_and_check(idx,expVal).putIfMatch(key,putval,expVal);
       }
       // Win or lose the CAS, we are done.  If we won then we know the update
       // happened as expected.  If we lost, it means "we won but another thread
