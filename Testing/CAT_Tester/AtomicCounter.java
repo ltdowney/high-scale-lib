@@ -1,4 +1,4 @@
-import org.cliffc.high_scale_lib.*;
+
 import java.util.concurrent.atomic.*;
 public final class AtomicCounter extends Counter {
   public String name() { return "Atomic"; }

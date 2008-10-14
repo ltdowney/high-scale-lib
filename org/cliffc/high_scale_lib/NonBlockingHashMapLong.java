@@ -528,9 +528,8 @@ public class NonBlockingHashMapLong<TypeV>
         // get and put must have the same key lookup logic!  But only 'put'
         // needs to force a table-resize for a too-long key-reprobe sequence.
         // Check for too-many-reprobes on get.
-        //topmap._reprobes.add(1);
         if( ++reprobe_cnt >= reprobe_limit(len) ) // too many probes
-          return null;            // This is treated as a MISS in this table.
+          return copy_slot_and_check(idx,key).get_impl(key); // Retry in the new table
         
         idx = (idx+1)&(len-1);    // Reprobe by 1!  (could now prefetch)
       }

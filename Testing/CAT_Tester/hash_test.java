@@ -5,13 +5,10 @@
  */
 
 
-import java.io.*;
 import org.cliffc.high_scale_lib.*;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
-import sun.misc.Unsafe;
-import java.lang.reflect.*;
 
 public class hash_test extends Thread {
   static int _read_ratio, _gr, _pr;
@@ -57,7 +54,7 @@ public class hash_test extends Thread {
 
   public static void main( String args[] ) throws Exception {
     // Parse args
-    try { 
+    try {
       _read_ratio   = check( args[0], "read%", 0, 100 );
       _thread_min   = check( args[1], "thread_min", 1, 100000 );
       _thread_max   = check( args[2], "thread_max", 1, 100000 );
@@ -75,9 +72,9 @@ public class hash_test extends Thread {
       System.out.println("Usage: hash_test read%[0=churn test] thread-min thread-max thread-increment hash_table_size impl[All=0,Hashtable=1,HerlihyHashSet=2,CHM_16=3,CHM_256=4,CHM_4096=5,NonBlockingHashMap=6]");
       throw e;
     }
-    
-    System.out.print(  _read_ratio+"% gets, "+ 
-                       ((100-_read_ratio)>>1)+"% inserts, "+ 
+
+    System.out.print(  _read_ratio+"% gets, "+
+                       ((100-_read_ratio)>>1)+"% inserts, "+
                        ((100-_read_ratio)>>1)+"% removes, " +
                        "table_size="+_table_size);
     if( _read_ratio==0 )
@@ -97,7 +94,7 @@ public class hash_test extends Thread {
       histo[KEYS[i].hashCode() >>>(32-6)]++;
     }
     // verify good key spread to help ConcurrentHashMap
-    //for( int i=0; i<histo.length; i++ ) 
+    //for( int i=0; i<histo.length; i++ )
     //  System.out.print(" "+histo[i]);
 
     System.out.println("Warmup -variance: ");
@@ -109,7 +106,7 @@ public class hash_test extends Thread {
     for( int i=0; i<num_trials; i++ )
       System.out.printf(" %3d       ",i);
     System.out.println("   Avg      Stddev");
-    for( int i=_thread_min; i<=_thread_max; i += _thread_incr ) 
+    for( int i=_thread_min; i<=_thread_max; i += _thread_incr )
       run_till_stable( i, num_trials );
   }
 
@@ -149,14 +146,14 @@ public class hash_test extends Thread {
       long[] nanos = new long[num_threads];
       long millis = run_once(num_threads,HM,ops,nanos);
       long sum = 0;
-      for( int i=0; i<num_threads; i++ ) 
+      for( int i=0; i<num_threads; i++ )
         sum += ops[i];
       long ops_per_sec = (sum*1000L)/millis;
       trials[j] = ops_per_sec;
       total += ops_per_sec;
       System.out.printf(" %10d",ops_per_sec);
 
-      
+
       //for( int i=0; i<num_threads; i++ ) {
       //  if( nanos[i] < 1980000000 ||
       //      nanos[i] > 2010000000 ||
@@ -197,7 +194,7 @@ public class hash_test extends Thread {
         avg = total/(trials.length-2-2);
         stddev = compute_stddev(trials,trials.length-2-2);
         p = stddev*100/avg;  // std-dev as a percent
-      } 
+      }
       System.out.printf(" %10d",avg);
       System.out.printf(" (+/-%2d%%)  %d",p,HM.size());
     }
@@ -228,12 +225,11 @@ public class hash_test extends Thread {
     Random R = new Random();
     _start = false;
     _stop = false;
-    
+
     HM.put("Cliff","Cliff");
     HM.remove("Cliff");
 
     int sz = HM.size();
-    int xsz=0;
     while( sz+1024 < _table_size ) {
       int idx = R.nextInt();
       for( int i=0; i<1024; i++ ) {
@@ -257,7 +253,7 @@ public class hash_test extends Thread {
         idx++;
         if( (trip & 15)==15 ) idx = R.nextInt();
         if( trip++ > 1024*1024 ) {
-          if( trip > 1024*1024+100 ) 
+          if( trip > 1024*1024+100 )
             throw new Exception("barf trip "+sz+" "+HM.size()+" numkeys="+KEYS.length);
           System.out.println(key);
         }

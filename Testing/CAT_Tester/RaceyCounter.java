@@ -1,4 +1,3 @@
-import org.cliffc.high_scale_lib.*;
 public final class RaceyCounter extends Counter {
   private long _cnt;
   public long get(){ return _cnt; }

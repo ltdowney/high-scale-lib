@@ -1,5 +1,3 @@
-import org.cliffc.high_scale_lib.*;
-import java.util.concurrent.*;
 import java.util.concurrent.locks.*;
 
 public final class LockCounter extends Counter {
@@ -7,10 +5,10 @@ public final class LockCounter extends Counter {
   private final ReentrantLock _lock = new ReentrantLock();
   private long _cnt;
   public long get(){ return _cnt; }
-  public void add( long x ) { 
+  public void add( long x ) {
     try {
       _lock.lock();
-      _cnt += x; 
+      _cnt += x;
     } finally {
       _lock.unlock();
     }

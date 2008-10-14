@@ -74,11 +74,11 @@ public class NBHM_Tester2 extends TestCase {
   // Check all iterators for correct size counts
   private void checkSizes(int expectedSize) {
     assertEquals( "size()", _nbhm.size(), expectedSize );
-    Collection vals = _nbhm.values();
+    Collection<String> vals = _nbhm.values();
     checkSizes("values()",vals.size(),vals.iterator(),expectedSize);
-    Set keys = _nbhm.keySet();
+    Set<String> keys = _nbhm.keySet();
     checkSizes("keySet()",keys.size(),keys.iterator(),expectedSize);
-    Set ents = _nbhm.entrySet();
+    Set<Entry<String,String>> ents = _nbhm.entrySet();
     checkSizes("entrySet()",ents.size(),ents.iterator(),expectedSize);
   }
 
@@ -92,7 +92,7 @@ public class NBHM_Tester2 extends TestCase {
     }
     assertEquals( msg, expectedSize, result );
   }
-  
+
 
   public void testIteration() {
     assertTrue ( _nbhm.isEmpty() );
@@ -154,10 +154,23 @@ public class NBHM_Tester2 extends TestCase {
     }
   }
 
+  public void testIterationBig2() {
+    final int CNT = 10000;
+    assertThat( _nbhm.size(), is(0) );
+    final String v = "v";
+    for( int i=0; i<CNT; i++ ) {
+      final String z = "k"+i;
+      _nbhm.put(z,v);
+      String s = _nbhm.get(z);
+      assertThat( s, is(v) );
+    }
+    assertThat( _nbhm.size(), is(CNT) );
+  }
+
   public void testIterationBig() {
     final int CNT = 10000;
     assertThat( _nbhm.size(), is(0) );
-    for( int i=0; i<CNT; i++ ) 
+    for( int i=0; i<CNT; i++ )
       _nbhm.put("k"+i,"v"+i);
     assertThat( _nbhm.size(), is(CNT) );
 
@@ -221,7 +234,7 @@ public class NBHM_Tester2 extends TestCase {
     for( int j=0; j<10; j++ ) {
       long start = System.nanoTime();
       for( int i=d; i<ITERS; i+=2 )
-        assertThat( "this key not in there, so putIfAbsent must work", 
+        assertThat( "this key not in there, so putIfAbsent must work",
                     nbhm.putIfAbsent("k"+i,thrd), is((String)null) );
       for( int i=d; i<ITERS; i+=2 )
         assertTrue( nbhm.remove("k"+i,thrd) );
@@ -236,15 +249,15 @@ public class NBHM_Tester2 extends TestCase {
     NonBlockingHashMap<Long,String> items = new NonBlockingHashMap<Long,String>();
     items.put(Long.valueOf(100), "100");
     items.put(Long.valueOf(101), "101");
-    
+
     assertEquals("keySet().size()", 2, items.keySet().size());
     assertTrue("keySet().contains(100)", items.keySet().contains(Long.valueOf(100)));
     assertTrue("keySet().contains(101)", items.keySet().contains(Long.valueOf(101)));
-    
+
     assertEquals("values().size()", 2, items.values().size());
     assertTrue("values().contains(\"100\")", items.values().contains("100"));
     assertTrue("values().contains(\"101\")", items.values().contains("101"));
-    
+
     assertEquals("entrySet().size()", 2, items.entrySet().size());
     boolean found100 = false;
     boolean found101 = false;
@@ -260,14 +273,14 @@ public class NBHM_Tester2 extends TestCase {
     assertTrue("entrySet().contains([100])", found100);
     assertTrue("entrySet().contains([101])", found101);
   }
-  
+
   // Concurrent insertion & then iterator test.
   static public void testNonBlockingHashMapIterator() throws InterruptedException {
     final int ITEM_COUNT1 = 1000;
     final int THREAD_COUNT = 5;
     final int PER_CNT = ITEM_COUNT1/THREAD_COUNT;
     final int ITEM_COUNT = PER_CNT*THREAD_COUNT; // fix roundoff for odd thread counts
-  
+
     NonBlockingHashMap<Long,TestKey> nbhml = new NonBlockingHashMap<Long,TestKey>();
     // use a barrier to open the gate for all threads at once to avoid rolling
     // start and no actual concurrency
@@ -391,15 +404,15 @@ public class NBHM_Tester2 extends TestCase {
     public void checkedPut(final long id, final int type, final int hash) {
       _size++;
       final TestKey item = new TestKey(id, type, hash);
-      if( !_items.containsKey(type) ) 
+      if( !_items.containsKey(type) )
         _items.put(type, new LinkedList<TestKey>());
       _items.get(type).add(item);
     }
-    	
+
     public NonBlockingHashMap<Long,TestKey> getMapMultithreaded() throws InterruptedException, ExecutionException {
       final int threadCount = _items.keySet().size();
       final NonBlockingHashMap<Long,TestKey> map = new NonBlockingHashMap<Long,TestKey>();
-        	
+
       // use a barrier to open the gate for all threads at once to avoid rolling start and no actual concurrency
       final CyclicBarrier barrier = new CyclicBarrier(threadCount);
       final ExecutorService ex = Executors.newFixedThreadPool(threadCount);
@@ -410,7 +423,7 @@ public class NBHM_Tester2 extends TestCase {
         TestKeyFeederThread feeder = new TestKeyFeederThread(type, items, map, barrier);
         co.submit(feeder);
       }
-        	
+
       // wait for all threads to return
       int itemCount = 0;
       for( int retCount = 0; retCount < threadCount; retCount++ ) {
@@ -434,7 +447,7 @@ public class NBHM_Tester2 extends TestCase {
       _items = items;
       _barrier = barrier;
     }
-    	
+
     public Integer call() throws Exception {
       _barrier.await();
       int count = 0;
@@ -453,7 +466,7 @@ public class NBHM_Tester2 extends TestCase {
     }
   }
 
-  // --- 
+  // ---
   public void testNonBlockingHashMapIteratorMultithreaded() throws InterruptedException, ExecutionException {
     TestKeyFeeder feeder = getTestKeyFeeder();
     final int itemCount = feeder.size();
@@ -461,7 +474,7 @@ public class NBHM_Tester2 extends TestCase {
     // validate results
     final NonBlockingHashMap<Long,TestKey> items = feeder.getMapMultithreaded();
     assertEquals("size()", itemCount, items.size());
-        
+
     assertEquals("values().size()", itemCount, items.values().size());
 
     assertEquals("entrySet().size()", itemCount, items.entrySet().size());
@@ -489,11 +502,11 @@ public class NBHM_Tester2 extends TestCase {
   //  ht.put("Nine", new Integer(9));
   //  ht.put("Ten", new Integer(10));
   //  ht.put("Ten1", new Integer(100));
-  //  
+  //
   //  Collection es = ht.values();
-  //  
+  //
   //  Object [] esa = es.toArray();
-  //  
+  //
   //  ht.remove("Ten1");
   //
   //  assertEquals( "size check", es.size(), 2 );

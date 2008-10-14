@@ -3,9 +3,6 @@
  * http://creativecommons.org/licenses/publicdomain
  */
 
-
-import org.cliffc.high_scale_lib.*;
-
 public class Harness extends Thread {
   static int _thread_min, _thread_max, _thread_incr;
   static int _ctr_impl;
@@ -44,7 +41,7 @@ public class Harness extends Thread {
 
   public static void main( String args[] ) {
     // Parse args
-    try { 
+    try {
       _thread_min   = check( args[0], "thread_min", 1, 100000 );
       _thread_max   = check( args[1], "thread_max", 1, 100000 );
       _thread_incr  = check( args[2], "thread_incr", 1, 100000 );
@@ -101,7 +98,7 @@ public class Harness extends Thread {
       long[] ops = new long[num_threads];
       long millis = run_once(num_threads,C,ops);
       long sum = 0;
-      for( int i=0; i<num_threads; i++ ) 
+      for( int i=0; i<num_threads; i++ )
         sum += ops[i];
       total_ops += sum;
       sum = sum*1000L/millis;
@@ -130,7 +127,7 @@ public class Harness extends Thread {
       System.out.printf(" %10d",avg);
       System.out.printf(" (+/-%2d%%)",p);
     }
-    
+
     long loss = total_ops - C.get();
     if( loss != 0 ) {
       System.out.print("  Lossage=");
@@ -140,7 +137,7 @@ public class Harness extends Thread {
 
     if( C instanceof CATCounter ) {
       CATCounter cat = (CATCounter)C;
-      System.out.print(" autotable="+ cat.internal_size()); 
+      System.out.print(" autotable="+ cat.internal_size());
       if( loss != 0 ) cat.print();
     }
 

@@ -158,7 +158,7 @@ public class nbsi_tester extends TestCase {
     t1.start();
     work_helper(nbsi,"T0",1);
     t1.join();
-    
+
     // In the end, all members should be removed
     StringBuffer buf = new StringBuffer();
     buf.append("Should be emptyset but has these elements: {");
