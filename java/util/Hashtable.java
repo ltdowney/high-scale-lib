@@ -17,7 +17,7 @@ import  org.cliffc.high_scale_lib.NonBlockingHashtable;
  * completely compatible, including the serialized forms.
  *
  * This version is <strong>not</strong> synchronized, and correctly operates
- * in as a thread-safe Hashtable.  It does <strong>not</strong> provide the
+ * as a thread-safe Hashtable.  It does <strong>not</strong> provide the
  * same ordering guarantees as calling synchronized methods will.  The old
  * Hashtable's methods were synchronized and would provide ordering.  This
  * behavior is not part of Hashtable's spec.  This version's methods are not
