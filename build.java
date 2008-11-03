@@ -254,7 +254,6 @@ class build {
     // Return true if the target file (apparently) got updated.
     // File times are maintained *very* coarsely by some OS's: linux rounds down to 1 sec
     final boolean make() {
-
       // See if we are already up-to-date.  We do it when we first back the
       // target string with an OS file.  Must check before recursion, or else
       // a DAG takes exponentional time.
@@ -290,6 +289,9 @@ class build {
         if( !_justprint ) _dst.delete();
         return true;
       }
+
+      if( _srcs.length==0 && _modtime==0 )
+        throw new BuildError("Source file "+_target+" does not exist");
 
       // Now see if we are later or earlier
       long last_src = latest();
@@ -341,8 +343,7 @@ class build {
       if( _modtime < last_src )
         throw new IllegalArgumentException("Timestamp for "+_target+" not changed by building "+_target);
       // Invariant: last_src <= _modtime <= now
-
-      
+     
       // For very fast build-steps, the target may be updated to a time equal
       // to the input file times after rounding to the file-system's time
       // precision - which might be as bad as 1 whole second.  Assume the
@@ -560,10 +561,16 @@ class build {
   static final Q _tnbsi_cls = new QS(TNBHS+"/nbsi_tester.class",javac_junit, _tnbsi_j);
   static final Q _tnbsi_tst = new Q_JUnit(TNBHS+"/nbsi_tester", java_junit+"Testing.NBHS_Tester.nbsi_tester", _nbsi_cls,_tnbsi_cls);
 
+  static final String CTNBQ = "contrib/Testing/NBQ_Tester";
+  static final Q _ctnbq_j   = new Q(CTNBQ+"/NBQ_Tester.java");
+  static final Q _ctnbq_cls = new QS(CTNBQ+"/NBQ_Tester.class",javac_junit, _ctnbq_j);
+  static final Q _ctnbq_tst = new Q_JUnit(CTNBQ+"/NBQ_Tester", java_junit+"contrib.Testing.NBQ_Tester.NBQ_Tester",_ctnbq_cls, _ctnbq_cls);
+
+
   // The high-scale-lib.jar file.  Demand JUnit testing in addition to class
   // files (the testing demands the relavent class files).
   static final Q _hsl_jar = new QS("lib/high-scale-lib.jar","jar -cf %dst %top/"+HSL,' ',
-                                   _absen_cls, _cat_cls, _cntr_cls, _tnbhm_tst, _tnbhml_tst, _tnbhs_tst, _tnbsi_tst, _unsaf_cls );
+                                   _absen_cls, _cat_cls, _cntr_cls, _tnbhm_tst, _tnbhml_tst, _tnbhs_tst, _tnbsi_tst, _ctnbq_tst,_unsaf_cls );
 
   // Wrappers for common JDK files
   static final String JU = "java/util";

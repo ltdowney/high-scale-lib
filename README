@@ -26,7 +26,7 @@ JDK rev's).
 If you want to drop-in the non-blocking versions of Hashtable, HashMap or
 ConcurrentHashMap, you'll need to alter your bootclasspath - these classes
 come directly from your JDK and so are found via the System loader before any
-class-path can be hacks are done.  
+class-path hacks can be done.  
 
 To replace the JDK implementation of Hashtable with a non-blocking version of
 Hashtable, add java_util_hashtable.jar to your java launch line:
