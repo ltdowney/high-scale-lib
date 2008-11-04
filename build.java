@@ -569,7 +569,7 @@ class build {
 
   // The high-scale-lib.jar file.  Demand JUnit testing in addition to class
   // files (the testing demands the relavent class files).
-  static final Q _hsl_jar = new QS("lib/high-scale-lib.jar","jar -cf %dst %top/"+HSL,' ',
+  static final Q _hsl_jar = new QS("lib/high-scale-lib.jar","jar -cf %dst "+HSL,' ',
                                    _absen_cls, _cat_cls, _cntr_cls, _tnbhm_tst, _tnbhml_tst, _tnbhs_tst, _tnbsi_tst, _ctnbq_tst,_unsaf_cls );
 
   // Wrappers for common JDK files
